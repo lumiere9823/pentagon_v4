@@ -16,8 +16,8 @@
 |---|---|---|---|---|
 | 00 — Discovery & feasibility | DONE | Discovery report approved by user | None | Tech Lead |
 | 01 — Foundation & CI | DONE | Git init, Laravel 13/Vue 3/TS skeleton, PostgreSQL setup, Pint (pass), Vue linter (pass), 43/43 Pest tests passed, production build passed | None | Tech Lead |
-| 02 — Identity & website management | NOT STARTED | Ready to implement | None | Tech Lead |
-| 03 — Document engine & registry | NOT STARTED | | | |
+| 02 — Identity & website management | DONE | Migrations, Models, Policies, UI, IDOR tests, 64/64 Pest tests passed, Vite build passed | None | Tech Lead |
+| 03 — Document engine & registry | NOT STARTED | Ready to implement | None | Tech Lead |
 | 04 — Design system & editor shell | NOT STARTED | | | |
 | 05 — Visual editing core | NOT STARTED | | | |
 | 06 — Responsive, media & templates | NOT STARTED | | | |
@@ -41,10 +41,16 @@
 | P01-04 | PHP & Frontend linting / typecheck setup | DONE | `pint --test` passed, `npm run check resources` passed, `vue-tsc` passed | 0 warnings/errors |
 | P01-05 | Automated testing baseline | DONE | `php artisan test` 43/43 tests passed | Pest PHP suite |
 | P01-06 | Health check and smoke test | DONE | `/api/health` and `/up` endpoints with feature tests | Safe, no leaks |
+| P02-01 | Data models & PostgreSQL migrations | DONE | `websites`, `website_memberships`, `pages` created with constraints | FKs & unique indexes |
+| P02-02 | Policies & IDOR prevention | DONE | `WebsitePolicy`, `WebsiteMembershipPolicy`, `PagePolicy` | 404 on cross-site mismatch |
+| P02-03 | Form Requests & validation | DONE | Store/Update requests for websites, memberships, pages | Slug & role validation |
+| P02-04 | Controllers & Web routes | DONE | `WebsiteController`, `WebsiteMembershipController`, `PageController` | 14 RESTful routes |
+| P02-05 | Inertia Vue 3 UI management | DONE | `Websites/Index`, `Create`, `Show`, `Pages/Create`, `Edit` | Tailwind v4 + TypeScript |
+| P02-06 | Security & Regression testing | DONE | 64/64 Pest tests passed, 222 assertions | IDOR & invariant covered |
 
 ## Gate before moving to next phase
 - [x] All phase acceptance criteria passed.
-- [x] Tests/evidence attached (Pint, TypeScript, Vite build, Pest 43/43).
-- [x] Security and failure paths reviewed (No secrets in repo/logs/health endpoints).
+- [x] Tests/evidence attached (Pint, TypeScript, Vite build, Pest 64/64).
+- [x] Security and failure paths reviewed (IDOR prevented, owner invariant preserved).
 - [x] No unresolved blocker without an explicit decision.
 - [x] Documentation updated.

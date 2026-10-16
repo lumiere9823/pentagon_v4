@@ -1,0 +1,155 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Enums\WebsiteRole;
+use App\Http\Requests\StoreWebsiteRequest;
+use App\Http\Requests\UpdateWebsiteRequest;
+use App\Models\Page;
+use App\Models\Website;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Inertia\Inertia;
+use Inertia\Response;
+
+class WebsiteController extends Controller
+{
+    public function index(Request $request): Response
+    {
+        $user = $request->user();
+
+        $websites = $user->websites()
+            ->withCount('pages')
+            ->orderByPivot('created_at', 'desc')
+            ->get()
+            ->map(function (Website $website) use ($user) {
+                return [
+                    'id' => $website->id,
+                    'name' => $website->name,
+                    'slug' => $website->slug,
+                    'status' => $website->status,
+                    'pages_count' => $website->pages_count,
+                    'role' => $website->pivot?->role,
+                    'is_owner' => $website->owner_id === $user->id,
+                    'created_at' => $website->created_at?->toIso8601String(),
+                ];
+            });
+
+        return Inertia::render('Websites/Index', [
+            'websites' => $websites,
+        ]);
+    }
+
+    public function create(Request $request): Response
+    {
+        $this->authorize('create', Website::class);
+
+        return Inertia::render('Websites/Create');
+    }
+
+    public function store(StoreWebsiteRequest $request): RedirectResponse
+    {
+        $user = $request->user();
+
+        $website = DB::transaction(function () use ($request, $user) {
+            $website = new Website;
+            $website->owner_id = $user->id;
+            $website->name = $request->validated('name');
+            $website->slug = $request->validated('slug');
+            $website->status = 'active';
+            $website->save();
+
+            // Synchronize owner membership invariant
+            $website->memberships()->create([
+                'user_id' => $user->id,
+                'role' => WebsiteRole::OWNER,
+            ]);
+
+            return $website;
+        });
+
+        return redirect()->route('websites.show', $website)
+            ->with('success', 'Website created successfully.');
+    }
+
+    public function show(Request $request, Website $website): Response
+    {
+        $this->authorize('view', $website);
+
+        $user = $request->user();
+        $userRole = $website->getMemberRole($user);
+
+        $pages = $website->pages()
+            ->with(['creator:id,name', 'updater:id,name'])
+            ->orderBy('created_at', 'desc')
+            ->get()
+            ->map(function ($page) {
+                return [
+                    'id' => $page->id,
+                    'title' => $page->title,
+                    'slug' => $page->slug,
+                    'status' => $page->status->value,
+                    'creator' => $page->creator?->only(['id', 'name']),
+                    'updater' => $page->updater?->only(['id', 'name']),
+                    'created_at' => $page->created_at?->toIso8601String(),
+                    'updated_at' => $page->updated_at?->toIso8601String(),
+                ];
+            });
+
+        $memberships = $website->memberships()
+            ->with('user:id,name,email')
+            ->orderBy('created_at', 'asc')
+            ->get()
+            ->map(function ($membership) use ($website) {
+                return [
+                    'id' => $membership->id,
+                    'user_id' => $membership->user_id,
+                    'role' => $membership->role->value,
+                    'is_primary_owner' => $membership->user_id === $website->owner_id,
+                    'user' => $membership->user?->only(['id', 'name', 'email']),
+                    'created_at' => $membership->created_at?->toIso8601String(),
+                ];
+            });
+
+        return Inertia::render('Websites/Show', [
+            'website' => [
+                'id' => $website->id,
+                'name' => $website->name,
+                'slug' => $website->slug,
+                'status' => $website->status,
+                'created_at' => $website->created_at?->toIso8601String(),
+            ],
+            'pages' => $pages,
+            'memberships' => $memberships,
+            'userRole' => $userRole?->value,
+            'can' => [
+                'update' => $user->can('update', $website),
+                'delete' => $user->can('delete', $website),
+                'create_page' => $user->can('create', [Page::class, $website]),
+                'manage_members' => $userRole === WebsiteRole::OWNER,
+            ],
+        ]);
+    }
+
+    public function update(UpdateWebsiteRequest $request, Website $website): RedirectResponse
+    {
+        $website->update([
+            'name' => $request->validated('name'),
+            'slug' => $request->validated('slug'),
+        ]);
+
+        return redirect()->route('websites.show', $website)
+            ->with('success', 'Website updated successfully.');
+    }
+
+    public function destroy(Request $request, Website $website): RedirectResponse
+    {
+        $this->authorize('delete', $website);
+
+        $website->delete();
+
+        return redirect()->route('websites.index')
+            ->with('success', 'Website deleted successfully.');
+    }
+}
