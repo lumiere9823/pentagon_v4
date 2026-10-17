@@ -144,8 +144,8 @@ const getStatusBadge = (status: string) => {
                         <p class="text-xs">
                             {{
                                 leftSidebarOpen
-                                    ? 'Collapse Components'
-                                    : 'Expand Components'
+                                    ? 'Collapse Components (Ctrl+B)'
+                                    : 'Expand Components (Ctrl+B)'
                             }}
                         </p>
                     </TooltipContent>

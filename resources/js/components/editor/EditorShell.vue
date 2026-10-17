@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { PanelLeftOpen, SlidersHorizontal } from '@lucide/vue';
 import ComponentLibrary from './ComponentLibrary.vue';
 import EditorCanvas from './EditorCanvas.vue';
 import EditorToolbar from './EditorToolbar.vue';
@@ -94,21 +95,41 @@ const fetchRegistryMeta = async () => {
 onMounted(() => {
     fetchRegistryMeta();
     if (typeof window !== 'undefined') {
-        window.addEventListener('keydown', handleGlobalEscape);
+        window.addEventListener('keydown', handleGlobalKeyDown);
     }
 });
 
 onUnmounted(() => {
     if (typeof window !== 'undefined') {
-        window.removeEventListener('keydown', handleGlobalEscape);
+        window.removeEventListener('keydown', handleGlobalKeyDown);
     }
 });
 
-function handleGlobalEscape(e: KeyboardEvent) {
+function handleGlobalKeyDown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
         clearSelection();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        // Prevent default browser bookmark shortcut and toggle sidebar
+        const target = e.target as HTMLElement | null;
+        const isInputField =
+            target &&
+            (target.tagName === 'INPUT' ||
+                target.tagName === 'TEXTAREA' ||
+                target.isContentEditable);
+        if (!isInputField) {
+            e.preventDefault();
+            toggleLeftSidebar();
+        }
     }
 }
+
+const handleSelectNode = (nodeId: string) => {
+    selectNode(nodeId);
+    // Auto-open Inspector if closed so user can edit immediately
+    if (!rightPanelOpen.value) {
+        toggleRightPanel();
+    }
+};
 
 // Current metadata for selected node
 const selectedNodeMetadata = computed(() => {
@@ -205,7 +226,7 @@ const handleUpdateProp = (payload: { key: string; value: unknown }) => {
 
 <template>
     <div
-        class="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground antialiased"
+        class="flex h-screen w-full flex-col overflow-hidden bg-background text-foreground antialiased"
     >
         <!-- Top Toolbar -->
         <EditorToolbar
@@ -242,6 +263,48 @@ const handleUpdateProp = (payload: { key: string; value: unknown }) => {
 
         <!-- Main Body: 3-column Layout (Component Library, Canvas Frame, Inspector Panel) -->
         <div class="relative flex flex-1 overflow-hidden">
+            <!-- Floating toggle button for Left Sidebar when collapsed -->
+            <transition
+                enter-active-class="transition duration-150 ease-out"
+                enter-from-class="opacity-0 -translate-x-2"
+                enter-to-class="opacity-100 translate-x-0"
+                leave-active-class="transition duration-100 ease-in"
+                leave-from-class="opacity-100 translate-x-0"
+                leave-to-class="opacity-0 -translate-x-2"
+            >
+                <button
+                    v-if="!leftSidebarOpen"
+                    type="button"
+                    class="absolute top-3 left-3 z-30 flex items-center gap-1.5 rounded-lg border bg-background/95 px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm backdrop-blur transition hover:bg-accent hover:text-accent-foreground"
+                    title="Expand Components Library (Ctrl+B)"
+                    @click="toggleLeftSidebar"
+                >
+                    <PanelLeftOpen class="h-3.5 w-3.5 text-primary" />
+                    <span class="hidden sm:inline">Components</span>
+                </button>
+            </transition>
+
+            <!-- Floating toggle button for Right Inspector when collapsed -->
+            <transition
+                enter-active-class="transition duration-150 ease-out"
+                enter-from-class="opacity-0 translate-x-2"
+                enter-to-class="opacity-100 translate-x-0"
+                leave-active-class="transition duration-100 ease-in"
+                leave-from-class="opacity-100 translate-x-0"
+                leave-to-class="opacity-0 translate-x-2"
+            >
+                <button
+                    v-if="!rightPanelOpen"
+                    type="button"
+                    class="absolute top-3 right-3 z-30 flex items-center gap-1.5 rounded-lg border bg-background/95 px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm backdrop-blur transition hover:bg-accent hover:text-accent-foreground"
+                    title="Expand Inspector Panel"
+                    @click="toggleRightPanel"
+                >
+                    <SlidersHorizontal class="h-3.5 w-3.5 text-primary" />
+                    <span class="hidden sm:inline">Inspector</span>
+                </button>
+            </transition>
+
             <!-- Left Sidebar: Component Library -->
             <transition
                 enter-active-class="transition-transform duration-200 ease-out"
@@ -255,6 +318,7 @@ const handleUpdateProp = (payload: { key: string; value: unknown }) => {
                     v-show="leftSidebarOpen"
                     :read-only="!can.edit"
                     @insert-component="handleInsertComponent"
+                    @close="toggleLeftSidebar"
                 />
             </transition>
 
@@ -266,7 +330,7 @@ const handleUpdateProp = (payload: { key: string; value: unknown }) => {
                 :selected-id="selectedNodeId"
                 :hovered-id="hoveredNodeId"
                 :read-only="!can.edit"
-                @select="selectNode"
+                @select="handleSelectNode"
                 @hover="setHoveredNode"
                 @clear-selection="clearSelection"
                 @move-up="handleMoveUp"
@@ -292,6 +356,8 @@ const handleUpdateProp = (payload: { key: string; value: unknown }) => {
                     :read-only="!can.edit"
                     @update-prop="handleUpdateProp"
                     @delete-node="handleDelete"
+                    @duplicate-node="handleDuplicate"
+                    @close="toggleRightPanel"
                 />
             </transition>
         </div>

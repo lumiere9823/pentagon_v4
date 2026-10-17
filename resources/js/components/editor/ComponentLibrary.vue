@@ -12,6 +12,7 @@ import {
     Minus,
     MousePointerClick,
     MoveVertical,
+    PanelLeftClose,
     Plus,
     RefreshCw,
     Search,
@@ -51,6 +52,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
     (e: 'insertComponent', type: CoreComponentType): void;
+    (e: 'close'): void;
 }>();
 
 const components = ref<ComponentMetadata[]>([]);
@@ -195,6 +197,23 @@ const handleItemClick = (type: CoreComponentType) => {
                             {{ filteredComponents.length }}
                         </Badge>
                     </div>
+
+                    <Tooltip>
+                        <TooltipTrigger as-child>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                class="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                aria-label="Collapse Components Sidebar"
+                                @click="emit('close')"
+                            >
+                                <PanelLeftClose class="h-3.5 w-3.5" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="right">
+                            <p class="text-xs">Collapse Sidebar</p>
+                        </TooltipContent>
+                    </Tooltip>
                 </div>
 
                 <!-- Search Input -->
