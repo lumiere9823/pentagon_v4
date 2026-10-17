@@ -175,11 +175,11 @@ const handleItemClick = (type: CoreComponentType) => {
 </script>
 
 <template>
-    <TooltipProvider :delay-duration="200">
-        <aside
-            class="flex h-full w-72 shrink-0 flex-col border-r bg-background select-none sm:w-80"
-            aria-label="Component Library"
-        >
+    <aside
+        class="flex h-full w-72 shrink-0 flex-col border-r bg-background select-none sm:w-80"
+        aria-label="Component Library"
+    >
+        <TooltipProvider :delay-duration="200">
             <!-- Header & Search -->
             <div class="flex flex-col gap-2.5 border-b p-3">
                 <div class="flex items-center justify-between">
@@ -439,6 +439,6 @@ const handleItemClick = (type: CoreComponentType) => {
                 <span class="font-medium">Drag-and-Drop:</span> Drag any item to
                 canvas or click to append.
             </div>
-        </aside>
-    </TooltipProvider>
+        </TooltipProvider>
+    </aside>
 </template>

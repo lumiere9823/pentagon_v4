@@ -5,6 +5,7 @@ import {
     CheckCircle2,
     Clock,
     Eye,
+    LayoutGrid,
     PanelLeftClose,
     PanelLeftOpen,
     PanelRightClose,
@@ -16,6 +17,7 @@ import {
 } from '@lucide/vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { SidebarTrigger } from '@/components/ui/sidebar';
 import {
     Tooltip,
     TooltipContent,
@@ -95,7 +97,11 @@ const getStatusBadge = (status: string) => {
             class="flex h-13 w-full shrink-0 items-center justify-between border-b bg-background px-3 select-none sm:px-4"
         >
             <!-- Left Area: Navigation & Page Identity -->
-            <div class="flex items-center gap-2 sm:gap-3">
+            <div class="flex items-center gap-1.5 sm:gap-2">
+                <!-- App Sidebar Trigger (Collapses/Expands Navigation Sidebar) -->
+                <SidebarTrigger class="h-8 w-8" />
+
+                <!-- Back to Website Pages Button -->
                 <Tooltip>
                     <TooltipTrigger as-child>
                         <Button
@@ -117,12 +123,17 @@ const getStatusBadge = (status: string) => {
                     </TooltipContent>
                 </Tooltip>
 
+                <!-- Component Library Trigger (Collapses/Expands Component Library) -->
                 <Tooltip>
                     <TooltipTrigger as-child>
                         <Button
                             variant="ghost"
                             size="icon"
                             class="h-8 w-8"
+                            :class="{
+                                'bg-accent text-accent-foreground':
+                                    leftSidebarOpen,
+                            }"
                             :aria-label="
                                 leftSidebarOpen
                                     ? 'Collapse Component Library'
@@ -130,14 +141,7 @@ const getStatusBadge = (status: string) => {
                             "
                             @click="emit('toggleLeftSidebar')"
                         >
-                            <component
-                                :is="
-                                    leftSidebarOpen
-                                        ? PanelLeftClose
-                                        : PanelLeftOpen
-                                "
-                                class="h-4 w-4"
-                            />
+                            <LayoutGrid class="h-4 w-4" />
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">

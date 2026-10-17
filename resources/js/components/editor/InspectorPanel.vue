@@ -181,11 +181,11 @@ const removeFaqItem = (index: number) => {
 </script>
 
 <template>
-    <TooltipProvider :delay-duration="200">
-        <aside
-            class="flex h-full w-72 shrink-0 flex-col border-l bg-background select-none sm:w-80"
-            aria-label="Component Inspector"
-        >
+    <aside
+        class="flex h-full w-72 shrink-0 flex-col border-l bg-background select-none sm:w-80"
+        aria-label="Component Inspector"
+    >
+        <TooltipProvider :delay-duration="200">
             <!-- Header -->
             <div
                 class="flex h-13 items-center justify-between border-b px-3 sm:px-4"
@@ -762,6 +762,6 @@ const removeFaqItem = (index: number) => {
                     </Button>
                 </div>
             </template>
-        </aside>
-    </TooltipProvider>
+        </TooltipProvider>
+    </aside>
 </template>
