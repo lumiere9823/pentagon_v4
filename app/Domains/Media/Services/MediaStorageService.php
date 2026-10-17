@@ -82,15 +82,15 @@ class MediaStorageService
         }
 
         // 3. Consistency check between finfo MIME and image header MIME
-        $headerMime = $imageInfo['mime'] ?? null;
+        $headerMime = $imageInfo['mime'];
         if ($headerMime !== $detectedMime) {
             throw ValidationException::withMessages([
                 'file' => 'The image format is inconsistent or corrupted.',
             ]);
         }
 
-        $width = (int) ($imageInfo[0] ?? 0);
-        $height = (int) ($imageInfo[1] ?? 0);
+        $width = (int) $imageInfo[0];
+        $height = (int) $imageInfo[1];
 
         if ($width < self::MIN_DIMENSION || $height < self::MIN_DIMENSION) {
             throw ValidationException::withMessages([

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Domains\Media\Exceptions\MediaUsageScanException;
 use App\Domains\Media\Services\MediaStorageService;
 use App\Domains\Media\Services\MediaUsageScanner;
 use App\Http\Requests\StoreMediaRequest;
@@ -10,9 +11,8 @@ use App\Models\MediaAsset;
 use App\Models\Website;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
-use Throwable;
 
 class MediaAssetController extends Controller
 {
@@ -125,27 +125,37 @@ class MediaAssetController extends Controller
         $this->authorize('delete', $mediaAsset);
 
         // Check if asset is referenced in any document sources
-        $referencingPages = $scanner->findUsagesInWebsite($website, $mediaAsset);
-        if (! empty($referencingPages)) {
+        try {
+            $referencingPages = $scanner->findUsagesInWebsite($website, $mediaAsset);
+        } catch (MediaUsageScanException $e) {
+            Log::error("Media usage scan failed for asset {$mediaAsset->id}: {$e->getMessage()}");
+
             return response()->json([
-                'message' => 'Cannot delete media asset because it is currently used on '.count($referencingPages).' page(s).',
+                'message' => 'Unable to verify media asset usage due to a scan error. Deletion was blocked for safety.',
+                'error_code' => 'media_scan_error',
+            ], 422);
+        }
+
+        if (! empty($referencingPages)) {
+            $hasIndeterminate = collect($referencingPages)->contains('reference_type', 'indeterminate');
+            $message = $hasIndeterminate
+                ? 'Cannot delete media asset because it is referenced or suspected in '.count($referencingPages).' page(s) with unparseable content.'
+                : 'Cannot delete media asset because it is currently used on '.count($referencingPages).' page(s).';
+
+            return response()->json([
+                'message' => $message,
                 'error_code' => 'media_in_use',
                 'referencing_pages' => $referencingPages,
             ], 422);
         }
 
-        $storagePath = $mediaAsset->storage_path;
-        $disk = $mediaAsset->storage_disk;
-
-        // Perform soft delete on the database record first
-        $mediaAsset->delete();
-
-        // Safely unlink the physical file from disk
-        try {
-            Storage::disk($disk)->delete($storagePath);
-        } catch (Throwable $e) {
-            Log::warning("Failed to unlink media asset {$mediaAsset->id} from disk: {$e->getMessage()}");
-        }
+        // Perform soft delete within a database transaction with row locking.
+        // Physical file unlinking is safely deferred to `media:prune-unreferenced`
+        // following a grace period to prevent TOCTOU race conditions with concurrent page saves.
+        DB::transaction(function () use ($mediaAsset) {
+            $locked = MediaAsset::where('id', $mediaAsset->id)->lockForUpdate()->first();
+            $locked?->delete();
+        });
 
         return response()->json([
             'success' => true,

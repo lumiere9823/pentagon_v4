@@ -103,9 +103,9 @@ Ghi quyết định đã được xác nhận. Các ý trong ADR ở trạng th�
 - **Decision:** (Proposed for approval at Sprint 2 Gate A)
   1. Implement `MediaUsageScanner` service that searches `pages.document_json` for matching asset storage paths within the same website.
   2. Deletion endpoint checks usage before proceeding: if referenced, aborts with HTTP 422 (`media_in_use`) and a list of referencing pages.
-  3. If unreferenced, perform soft delete (`deleted_at`) on the `MediaAsset` record and unlink file from disk.
-- **Consequences:** Accidental breaking of live page layouts is prevented; clear error messaging guides users to replace or remove images from pages before deleting the asset.
-- **Evidence / links:** `PHASE_06_SPRINT_2_BA_TECHNICAL_PLAN.md` Section 3.2.D & 8.1.
+  3. If unreferenced, perform soft delete (`deleted_at`) on the `MediaAsset` record within a database transaction with row locking (`lockForUpdate()`). Physical unlinking is deferred to an idempotent scheduled command (`media:prune-unreferenced`) after a configurable grace period (default 24 hours) with a final authoritative usage re-scan before file deletion.
+- **Consequences:** Accidental breaking of live page layouts is prevented; TOCTOU race conditions between concurrent page saves and asset deletions are eliminated; clear error messaging guides users if media is referenced or unparseable; physical files are safely retained during the grace period; and physical deletion occurs only after final usage confirmation.
+- **Evidence / links:** `PHASE_06_SPRINT_2_BA_TECHNICAL_PLAN.md` Section 3.2.D & 8.1; `app/Console/Commands/PruneUnreferencedMediaCommand.php`.
 
 ## Template
 ### D-XXX — Short title

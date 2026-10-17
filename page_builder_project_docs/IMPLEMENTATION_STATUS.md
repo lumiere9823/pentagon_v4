@@ -78,6 +78,7 @@
 | P06-08 | Reference Guard & Safe Deletion Scanner | DONE | `MediaUsageScanner.php` checking document sources, exact path matching, 422 `media_in_use` prevention | Pest unit/feature passed |
 | P06-09 | Media REST Endpoints & RBAC Policy | DONE | `MediaAssetController.php` (index, store, update, destroy) + `MediaAssetPolicy.php` enforcing owner/editor write, viewer read-only | IDOR 404 & viewer 403 verified |
 | P06-10 | Frontend Media Library & Inspector Integration | DONE | `MediaLibraryModal`, `MediaGrid`, `MediaCard`, `MediaUploadDropzone`, `MediaDetailsPanel`, `InspectorPanel` integration | 71 Vitest tests passed |
+| P06-11 | Remediate Sprint 2 Audit Findings (F-01, F-02, F-03, F-05) | DONE | Fail-closed scanning, TOCTOU prevention via deferred cleanup `media:prune-unreferenced`, PHPStan fixes, 131/131 Pest tests passed | Gate D remediated |
 
 ## Gate before moving to next phase
 - [x] All phase acceptance criteria passed.

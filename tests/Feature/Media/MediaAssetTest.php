@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Media;
 
+use App\Domains\Media\Exceptions\MediaUsageScanException;
 use App\Domains\Media\Services\MediaStorageService;
 use App\Domains\Media\Services\MediaUsageScanner;
 use App\Enums\WebsiteRole;
@@ -322,8 +323,15 @@ class MediaAssetTest extends TestCase
         // Assert soft deleted in database
         $this->assertSoftDeleted('media_assets', ['id' => $asset->id]);
 
-        // Assert unlinked from disk
+        // Physical file is retained during grace period to prevent TOCTOU race conditions
+        Storage::disk('public')->assertExists($asset->storage_path);
+
+        // When deferred cleanup command runs with --force, physical file is unlinked and record purged
+        $this->artisan('media:prune-unreferenced', ['--force' => true])
+            ->assertSuccessful();
+
         Storage::disk('public')->assertMissing($asset->storage_path);
+        $this->assertDatabaseMissing('media_assets', ['id' => $asset->id]);
     }
 
     public function test_reference_scanner_path_matching_is_exact_and_avoids_substring_collisions(): void
@@ -384,7 +392,7 @@ class MediaAssetTest extends TestCase
             ->once()
             ->withArgs(fn ($w, $a) => $w->id === $website->id && $a->id === $asset->id)
             ->andReturn([
-                ['id' => 42, 'title' => 'Landing Page', 'slug' => 'landing'],
+                ['id' => 42, 'title' => 'Landing Page', 'slug' => 'landing', 'reference_type' => 'confirmed'],
             ]);
 
         $response = $this->actingAs($owner)->deleteJson(route('websites.media.destroy', [$website, $asset]));
@@ -394,7 +402,238 @@ class MediaAssetTest extends TestCase
             ->assertJsonPath('referencing_pages.0.id', 42)
             ->assertJsonPath('referencing_pages.0.title', 'Landing Page');
 
-        // Asset must remain in DB and not be deleted
+        // Asset must remain in DB and not be soft deleted
         $this->assertNotSoftDeleted('media_assets', ['id' => $asset->id]);
+    }
+
+    public function test_reference_scanner_fails_closed_on_malformed_json_containing_filename(): void
+    {
+        $scanner = new MediaUsageScanner;
+        $asset = MediaAsset::factory()->make([
+            'storage_path' => 'media/1/corrupted-draft.png',
+        ]);
+
+        // Malformed JSON that includes the filename
+        $malformedJsonWithFilename = '{"root": {"type": "Image", "props": {"src": "/storage/media/1/corrupted-draft.png"';
+
+        // Must fail closed: indeterminate reference detected
+        $inspection = $scanner->inspectDocumentReference($malformedJsonWithFilename, $asset);
+        $this->assertTrue($inspection['referenced']);
+        $this->assertTrue($inspection['indeterminate']);
+        $this->assertTrue($scanner->isAssetReferencedInDocument($malformedJsonWithFilename, $asset));
+
+        // When finding usages, this page is included with reference_type = indeterminate
+        [$website, $owner] = $this->createWebsiteWithMembers();
+        $dbAsset = MediaAsset::factory()->create([
+            'website_id' => $website->id,
+            'storage_path' => 'media/1/corrupted-draft.png',
+        ]);
+
+        $mockScanner = $this->mock(MediaUsageScanner::class);
+        $mockScanner->shouldReceive('findUsagesInWebsite')
+            ->once()
+            ->andReturn([
+                ['id' => 99, 'title' => 'Broken Draft', 'slug' => 'broken', 'reference_type' => 'indeterminate'],
+            ]);
+
+        $response = $this->actingAs($owner)->deleteJson(route('websites.media.destroy', [$website, $dbAsset]));
+        $response->assertStatus(422)
+            ->assertJsonPath('error_code', 'media_in_use')
+            ->assertJsonPath('referencing_pages.0.reference_type', 'indeterminate');
+
+        $this->assertNotSoftDeleted('media_assets', ['id' => $dbAsset->id]);
+    }
+
+    public function test_reference_scanner_permits_deletion_on_malformed_json_without_filename(): void
+    {
+        $scanner = new MediaUsageScanner;
+        $asset = MediaAsset::factory()->make([
+            'storage_path' => 'media/1/safe-asset.png',
+        ]);
+
+        // Malformed JSON that has completely different content and does NOT contain safe-asset.png
+        $malformedJsonWithoutFilename = '{"invalid json syntax: [1, 2, 3';
+
+        $inspection = $scanner->inspectDocumentReference($malformedJsonWithoutFilename, $asset);
+        $this->assertFalse($inspection['referenced']);
+        $this->assertFalse($inspection['indeterminate']);
+        $this->assertFalse($scanner->isAssetReferencedInDocument($malformedJsonWithoutFilename, $asset));
+    }
+
+    public function test_reference_scanner_fails_closed_on_invalid_utf8_containing_filename(): void
+    {
+        $scanner = new MediaUsageScanner;
+        $asset = MediaAsset::factory()->make([
+            'storage_path' => 'media/1/utf8-asset.png',
+        ]);
+
+        // Malformed byte sequence containing the target filename
+        $invalidUtf8 = "{\"data\": \"media/1/utf8-asset.png\xC3\x28\"}";
+
+        $inspection = $scanner->inspectDocumentReference($invalidUtf8, $asset);
+        $this->assertTrue($inspection['referenced']);
+        $this->assertTrue($inspection['indeterminate']);
+    }
+
+    public function test_destroy_endpoint_handles_scanner_exception_safely(): void
+    {
+        [$website, $owner] = $this->createWebsiteWithMembers();
+        $asset = MediaAsset::factory()->create([
+            'website_id' => $website->id,
+            'storage_path' => 'media/1/scan-error.png',
+        ]);
+
+        $mockScanner = $this->mock(MediaUsageScanner::class);
+        $mockScanner->shouldReceive('findUsagesInWebsite')
+            ->once()
+            ->andThrow(new MediaUsageScanException('Simulated database query failure'));
+
+        $response = $this->actingAs($owner)->deleteJson(route('websites.media.destroy', [$website, $asset]));
+
+        $response->assertStatus(422)
+            ->assertJsonPath('error_code', 'media_scan_error');
+
+        // Asset must NOT be soft deleted or removed
+        $this->assertNotSoftDeleted('media_assets', ['id' => $asset->id]);
+    }
+
+    public function test_prune_unreferenced_command_respects_grace_period(): void
+    {
+        Storage::fake('public');
+        [$website] = $this->createWebsiteWithMembers();
+
+        $asset = MediaAsset::factory()->create([
+            'website_id' => $website->id,
+            'storage_path' => "media/{$website->id}/recent.png",
+            'deleted_at' => now()->subHours(2), // Deleted 2 hours ago
+        ]);
+        Storage::disk('public')->put($asset->storage_path, 'image-content');
+
+        // Run cleanup with default 24h grace period
+        $this->artisan('media:prune-unreferenced', ['--hours' => 24])
+            ->assertSuccessful();
+
+        // Asset was within grace period: must NOT be pruned
+        Storage::disk('public')->assertExists($asset->storage_path);
+        $this->assertSoftDeleted('media_assets', ['id' => $asset->id]);
+    }
+
+    public function test_prune_unreferenced_command_cleans_up_after_grace_period(): void
+    {
+        Storage::fake('public');
+        [$website] = $this->createWebsiteWithMembers();
+
+        $asset = MediaAsset::factory()->create([
+            'website_id' => $website->id,
+            'storage_path' => "media/{$website->id}/expired.png",
+            'deleted_at' => now()->subHours(25), // Deleted 25 hours ago
+        ]);
+        Storage::disk('public')->put($asset->storage_path, 'image-content');
+
+        // Run cleanup with 24h grace period
+        $this->artisan('media:prune-unreferenced', ['--hours' => 24])
+            ->assertSuccessful();
+
+        // Asset has passed grace period and is unreferenced: must be unlinked and purged
+        Storage::disk('public')->assertMissing($asset->storage_path);
+        $this->assertDatabaseMissing('media_assets', ['id' => $asset->id]);
+    }
+
+    public function test_prune_unreferenced_command_retains_asset_if_referenced_at_cleanup_time(): void
+    {
+        Storage::fake('public');
+        [$website] = $this->createWebsiteWithMembers();
+
+        $asset = MediaAsset::factory()->create([
+            'website_id' => $website->id,
+            'storage_path' => "media/{$website->id}/active.png",
+            'deleted_at' => now()->subHours(25),
+        ]);
+        Storage::disk('public')->put($asset->storage_path, 'image-content');
+
+        // Mock scanner reporting that a page acquired a reference to the asset during grace period
+        $mockScanner = $this->mock(MediaUsageScanner::class);
+        $mockScanner->shouldReceive('findUsagesInWebsite')
+            ->once()
+            ->andReturn([
+                ['id' => 10, 'title' => 'Home', 'slug' => 'home', 'reference_type' => 'confirmed'],
+            ]);
+
+        $this->artisan('media:prune-unreferenced', ['--hours' => 24])
+            ->assertSuccessful();
+
+        // Asset must be retained on disk!
+        Storage::disk('public')->assertExists($asset->storage_path);
+        $this->assertSoftDeleted('media_assets', ['id' => $asset->id]);
+    }
+
+    public function test_prune_unreferenced_command_retains_asset_on_scan_error(): void
+    {
+        Storage::fake('public');
+        [$website] = $this->createWebsiteWithMembers();
+
+        $asset = MediaAsset::factory()->create([
+            'website_id' => $website->id,
+            'storage_path' => "media/{$website->id}/error-case.png",
+            'deleted_at' => now()->subHours(25),
+        ]);
+        Storage::disk('public')->put($asset->storage_path, 'image-content');
+
+        $mockScanner = $this->mock(MediaUsageScanner::class);
+        $mockScanner->shouldReceive('findUsagesInWebsite')
+            ->once()
+            ->andThrow(new MediaUsageScanException('Database connection failed during prune'));
+
+        // Command fails or logs warning, but file MUST be retained
+        $this->artisan('media:prune-unreferenced', ['--hours' => 24])
+            ->assertFailed();
+
+        Storage::disk('public')->assertExists($asset->storage_path);
+        $this->assertSoftDeleted('media_assets', ['id' => $asset->id]);
+    }
+
+    public function test_prune_unreferenced_command_is_idempotent(): void
+    {
+        Storage::fake('public');
+        [$website] = $this->createWebsiteWithMembers();
+
+        $asset = MediaAsset::factory()->create([
+            'website_id' => $website->id,
+            'storage_path' => "media/{$website->id}/idempotent.png",
+            'deleted_at' => now()->subHours(25),
+        ]);
+        Storage::disk('public')->put($asset->storage_path, 'image-content');
+
+        // Run 1: unlinks and purges
+        $this->artisan('media:prune-unreferenced', ['--force' => true])
+            ->assertSuccessful();
+
+        Storage::disk('public')->assertMissing($asset->storage_path);
+        $this->assertDatabaseMissing('media_assets', ['id' => $asset->id]);
+
+        // Run 2: immediately runs again, clean exit
+        $this->artisan('media:prune-unreferenced', ['--force' => true])
+            ->assertSuccessful();
+    }
+
+    public function test_prune_unreferenced_command_rejects_paths_outside_website_directory(): void
+    {
+        Storage::fake('public');
+        [$website] = $this->createWebsiteWithMembers();
+
+        // Asset with path traversal or outside website dir
+        $asset = MediaAsset::factory()->create([
+            'website_id' => $website->id,
+            'storage_path' => 'media/999/malicious.png', // outside website 1
+            'deleted_at' => now()->subHours(25),
+        ]);
+        Storage::disk('public')->put($asset->storage_path, 'image-content');
+
+        $this->artisan('media:prune-unreferenced', ['--hours' => 24])
+            ->assertFailed();
+
+        // Must refuse to delete
+        Storage::disk('public')->assertExists($asset->storage_path);
+        $this->assertSoftDeleted('media_assets', ['id' => $asset->id]);
     }
 }

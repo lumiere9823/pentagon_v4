@@ -85,6 +85,8 @@ class MediaAsset extends Model
 
     /**
      * Get the public URL for the media asset.
+     *
+     * @return Attribute<string, never>
      */
     protected function url(): Attribute
     {
@@ -97,6 +99,8 @@ class MediaAsset extends Model
 
     /**
      * Get the human-readable formatted file size.
+     *
+     * @return Attribute<string, never>
      */
     protected function formattedSize(): Attribute
     {
