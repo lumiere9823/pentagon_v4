@@ -16,6 +16,9 @@ Ghi quyết định đã được xác nhận. Các ý trong ADR ở trạng th�
 | 2026-10-17 | D-010 | 12 Core Component Allowlist with Canonical Aliases | Restrict tree nodes to 12 allowed types with alias support (Rich Text, Card Grid) | Prevents arbitrary component injection; robust editor interop | User / Architect |
 | 2026-10-17 | D-011 | Server-Side Recursive Validator & Hard Limits | Enforce 512KB payload, 10 tree depth, 250 nodes, 50 children per node | Prevents ReDoS, stack overflow, DB bloat on 2GB RAM instances | User / Architect |
 | 2026-10-17 | D-012 | Symfony HTML Sanitizer for RichText XSS Prevention | Use standard W3C parser `symfony/html-sanitizer` over fragile regex | Bulletproof XSS mitigation (strips scripts, event handlers, javascript:/data: URIs) | User / Architect |
+| 2026-10-17 | D-013 | Separation of Page Metadata Route (`/edit`) and Visual Editor (`/builder`) | Keep `/edit` for page metadata form and create dedicated full-screen `/builder` (alias `/editor`) | Preserves Phase 02 metadata flow; provides dedicated SaaS canvas layout | User / Architect |
+| 2026-10-17 | D-014 | Viewport Switcher Architecture (Desktop 1280px, Tablet 768px, Mobile 375px) | Centralized presets config in `editor.ts` with ARIA radiogroup | Smooth frame transitions without modifying document schema or DB | User / Architect |
+| 2026-10-17 | D-015 | Dynamic API Component Library Loading with Boundary Validation | Consume `GET /api/components/registry` dynamically with loading skeleton and error retry | Zero hardcoded list in frontend; single source of truth in backend registry | User / Architect |
 
 ## Template
 ### D-XXX — Short title

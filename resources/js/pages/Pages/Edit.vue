@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { ArrowLeft, Edit } from '@lucide/vue';
+import { ArrowLeft, Edit, LayoutTemplate } from '@lucide/vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
@@ -71,21 +71,32 @@ const submit = () => {
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6">
-            <div class="flex items-center gap-2">
-                <Button variant="ghost" size="icon" as-child>
-                    <Link :href="`/websites/${website.id}`">
-                        <ArrowLeft class="h-4 w-4" />
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <Button variant="ghost" size="icon" as-child>
+                        <Link :href="`/websites/${website.id}`">
+                            <ArrowLeft class="h-4 w-4" />
+                        </Link>
+                    </Button>
+                    <div>
+                        <h1 class="text-2xl font-bold tracking-tight">
+                            Edit Page Metadata
+                        </h1>
+                        <p class="text-sm text-muted-foreground">
+                            Update title, slug or publish lifecycle status for
+                            this page.
+                        </p>
+                    </div>
+                </div>
+
+                <Button as-child>
+                    <Link
+                        :href="`/websites/${website.id}/pages/${page.id}/builder`"
+                    >
+                        <LayoutTemplate class="mr-1.5 h-4 w-4" />
+                        Open Page Builder
                     </Link>
                 </Button>
-                <div>
-                    <h1 class="text-2xl font-bold tracking-tight">
-                        Edit Page Metadata
-                    </h1>
-                    <p class="text-sm text-muted-foreground">
-                        Update title, slug or publish lifecycle status for this
-                        page.
-                    </p>
-                </div>
             </div>
 
             <Card>

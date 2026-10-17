@@ -48,3 +48,24 @@ export interface ValidationErrorResponse {
     code: string;
     message: string;
 }
+
+export interface ComponentRegistryResponse {
+    schemaVersion: number;
+    components: Record<string, ComponentMetadata>;
+    limits: {
+        maxPayloadBytes: number;
+        maxTreeDepth: number;
+        maxTotalNodes: number;
+        maxChildrenPerNode: number;
+    };
+}
+
+export type ViewportMode = 'desktop' | 'tablet' | 'mobile';
+
+export interface ViewportPreset {
+    id: ViewportMode;
+    label: string;
+    width: number;
+    widthCss: string;
+    description: string;
+}

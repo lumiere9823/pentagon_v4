@@ -8,6 +8,7 @@ import {
     Clock,
     Edit3,
     FileText,
+    LayoutTemplate,
     Plus,
     Settings,
     Shield,
@@ -323,6 +324,22 @@ const getStatusBadge = (status: string) => {
                         <div
                             class="col-span-2 flex items-center justify-end gap-2"
                         >
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                class="h-8 gap-1 px-2 text-xs"
+                                as-child
+                            >
+                                <Link
+                                    :href="`/websites/${website.id}/pages/${page.id}/builder`"
+                                    title="Open Page Builder"
+                                >
+                                    <LayoutTemplate class="h-3.5 w-3.5" />
+                                    <span class="hidden sm:inline"
+                                        >Builder</span
+                                    >
+                                </Link>
+                            </Button>
                             <Button
                                 v-if="can.create_page"
                                 variant="ghost"

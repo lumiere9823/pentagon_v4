@@ -70,6 +70,40 @@ class PageController extends Controller
         ]);
     }
 
+    public function builder(Request $request, Website $website, Page $page): Response
+    {
+        // Enforce IDOR protection: Page must belong to this website
+        if ($page->website_id !== $website->id) {
+            abort(404);
+        }
+
+        $this->authorize('view', $page);
+
+        $user = $request->user();
+        $membership = $website->memberships()->where('user_id', $user->id)->first();
+        $userRole = $membership?->role->value ?? 'viewer';
+
+        return Inertia::render('Pages/Builder', [
+            'website' => [
+                'id' => $website->id,
+                'name' => $website->name,
+                'slug' => $website->slug,
+            ],
+            'page' => [
+                'id' => $page->id,
+                'title' => $page->title,
+                'slug' => $page->slug,
+                'status' => $page->status->value,
+                'updated_at' => $page->updated_at?->toIso8601String(),
+            ],
+            'userRole' => $userRole,
+            'can' => [
+                'edit' => $user->can('update', $page),
+                'delete' => $user->can('delete', $page),
+            ],
+        ]);
+    }
+
     public function update(UpdatePageRequest $request, Website $website, Page $page): RedirectResponse
     {
         // Enforce IDOR protection: Page must belong to this website

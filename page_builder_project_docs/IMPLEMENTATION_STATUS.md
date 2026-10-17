@@ -1,7 +1,7 @@
 # Implementation Status
 
 **Last updated:** 2026-10-17  
-**Current phase:** Phase 03 — Document Engine & Registry (Completed) / Ready for Phase 04  
+**Current phase:** Phase 04 — Design System & Editor Shell (Completed) / Ready for Phase 05  
 **Overall status:** In progress
 
 ## Status legend
@@ -18,8 +18,8 @@
 | 01 — Foundation & CI | DONE | Git init, Laravel 13/Vue 3/TS skeleton, PostgreSQL setup, Pint (pass), Vue linter (pass), 43/43 Pest tests passed, production build passed | None | Tech Lead |
 | 02 — Identity & website management | DONE | Migrations, Models, Policies, UI, IDOR tests, 64/64 Pest tests passed, Vite build passed | None | Tech Lead |
 | 03 — Document engine & registry | DONE | Schema v1, 12 Core Components, Recursive DocumentValidator, HtmlSanitizer (symfony/html-sanitizer), 91/91 Pest tests passed, Pint & TS pass, Vite build pass | None | Tech Lead |
-| 04 — Design system & editor shell | NOT STARTED | Ready to implement | None | Tech Lead |
-| 05 — Visual editing core | NOT STARTED | | | |
+| 04 — Design system & editor shell | DONE | Editor Shell layout, Viewport Switcher (Desktop/Tablet/Mobile), Component Library via API registry, Canvas & Inspector placeholders, 98/98 Pest tests passed, Pint & TS pass, Vite build pass | None | Tech Lead |
+| 05 — Visual editing core | NOT STARTED | Ready to implement | None | Tech Lead |
 | 06 — Responsive, media & templates | NOT STARTED | | | |
 | 07 — Persistence & revisions | NOT STARTED | | | |
 | 08 — Preview & publishing | NOT STARTED | | | |
@@ -53,10 +53,16 @@
 | P03-04 | HTML / RichText Sanitizer against XSS | DONE | `HtmlSanitizer` via `symfony/html-sanitizer`, safe URL protocol checks | Script, onerror, javascript: & data: neutralized |
 | P03-05 | JSON Fixtures & Unit Test Suite | DONE | `minimal_valid.json`, `all_twelve_components.json`, 27 unit tests | All component prop & error cases covered |
 | P03-06 | Feature Tests & Quality Gates | DONE | `ComponentRegistryApiTest`, 91/91 tests pass, Pint pass, TypeScript pass, Vite build pass | Production quality gates satisfied |
+| P04-01 | Editor Routes & Authorization | DONE | `websites.pages.builder` and alias `websites.pages.editor` with policy authorization and IDOR protection | Viewer has read-only capability |
+| P04-02 | Editor Shell Layout & Viewport Switcher | DONE | 3-column layout (Left Sidebar, Canvas Surface, Inspector Panel), Desktop/Tablet/Mobile presets | Segmented control with ARIA |
+| P04-03 | Component Library API Integration | DONE | Dynamically consumed `GET /api/components/registry`, category filtering, search, loading skeleton, error retry | Zero hardcoded list |
+| P04-04 | Center Canvas & Inspector Shell | DONE | Responsive canvas width transition (1280px, 768px, 375px), unselected inspector state, Phase 05 placeholders | Overflow-safe layout |
+| P04-05 | Navigation & Cross-screen Linking | DONE | Seamless bi-directional navigation from `Websites/Show.vue` and `Pages/Edit.vue` into `Pages/Builder.vue` | Non-destructive integration |
+| P04-06 | Feature Tests & Quality Gates | DONE | `PageBuilderTest` (7 tests), 98/98 Pest tests pass, Pint pass, TypeScript pass, Vite build pass | All quality gates verified |
 
 ## Gate before moving to next phase
 - [x] All phase acceptance criteria passed.
-- [x] Tests/evidence attached (Pint, TypeScript, Vite build, Pest 64/64).
-- [x] Security and failure paths reviewed (IDOR prevented, owner invariant preserved).
+- [x] Tests/evidence attached (Pint, TypeScript, Vite build, Pest 98/98).
+- [x] Security and failure paths reviewed (IDOR prevented, role capability enforced).
 - [x] No unresolved blocker without an explicit decision.
 - [x] Documentation updated.
