@@ -12,6 +12,7 @@ import {
     Minus,
     MousePointerClick,
     MoveVertical,
+    Plus,
     RefreshCw,
     Search,
     Sparkles,
@@ -38,6 +39,19 @@ import type {
     ComponentRegistryResponse,
     CoreComponentType,
 } from '@/types/document';
+
+const props = withDefaults(
+    defineProps<{
+        readOnly?: boolean;
+    }>(),
+    {
+        readOnly: false,
+    },
+);
+
+const emit = defineEmits<{
+    (e: 'insertComponent', type: CoreComponentType): void;
+}>();
 
 const components = ref<ComponentMetadata[]>([]);
 const isLoading = ref<boolean>(true);
@@ -137,12 +151,31 @@ const groupedComponents = computed(() => {
 
     return groups;
 });
+
+// HTML5 Drag-and-Drop start
+const handleDragStart = (e: DragEvent, type: CoreComponentType) => {
+    if (props.readOnly) {
+        e.preventDefault();
+        return;
+    }
+    if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'copy';
+        e.dataTransfer.setData('application/json', JSON.stringify({ type }));
+        // Fallback plain text
+        e.dataTransfer.setData('text/plain', type);
+    }
+};
+
+const handleItemClick = (type: CoreComponentType) => {
+    if (props.readOnly) return;
+    emit('insertComponent', type);
+};
 </script>
 
 <template>
     <TooltipProvider :delay-duration="200">
         <aside
-            class="flex h-full w-72 shrink-0 flex-col border-r bg-background sm:w-80"
+            class="flex h-full w-72 shrink-0 flex-col border-r bg-background select-none sm:w-80"
             aria-label="Component Library"
         >
             <!-- Header & Search -->
@@ -286,7 +319,17 @@ const groupedComponents = computed(() => {
                                 <TooltipTrigger as-child>
                                     <div
                                         tabindex="0"
-                                        class="group flex items-center justify-between rounded-lg border border-border/60 bg-card p-2 text-left shadow-2xs transition-all hover:border-primary/40 hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                                        :draggable="!readOnly"
+                                        :class="[
+                                            'group flex items-center justify-between rounded-lg border border-border/60 bg-card p-2 text-left shadow-2xs transition-all',
+                                            readOnly
+                                                ? 'cursor-not-allowed opacity-60'
+                                                : 'cursor-grab hover:border-primary/40 hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:cursor-grabbing',
+                                        ]"
+                                        @dragstart="
+                                            handleDragStart($event, comp.type)
+                                        "
+                                        @click="handleItemClick(comp.type)"
                                     >
                                         <div class="flex items-center gap-2.5">
                                             <div
@@ -319,12 +362,26 @@ const groupedComponents = computed(() => {
                                             </div>
                                         </div>
 
-                                        <Badge
-                                            variant="outline"
-                                            class="text-[9px] font-normal opacity-80"
-                                        >
-                                            {{ comp.category }}
-                                        </Badge>
+                                        <div class="flex items-center gap-1.5">
+                                            <Badge
+                                                variant="outline"
+                                                class="text-[9px] font-normal opacity-80"
+                                            >
+                                                {{ comp.category }}
+                                            </Badge>
+                                            <Button
+                                                v-if="!readOnly"
+                                                variant="ghost"
+                                                size="icon"
+                                                class="h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
+                                                title="Click to insert"
+                                                @click.stop="
+                                                    handleItemClick(comp.type)
+                                                "
+                                            >
+                                                <Plus class="h-3 w-3" />
+                                            </Button>
+                                        </div>
                                     </div>
                                 </TooltipTrigger>
                                 <TooltipContent side="right" :side-offset="8">
@@ -342,9 +399,11 @@ const groupedComponents = computed(() => {
                                                     : ''
                                             }}
                                         </div>
-                                        <div class="text-[10px] text-primary">
-                                            Drag & drop will be enabled in Phase
-                                            05
+                                        <div
+                                            v-if="!readOnly"
+                                            class="text-[10px] text-primary"
+                                        >
+                                            Click to insert or drag to canvas
                                         </div>
                                     </div>
                                 </TooltipContent>
@@ -358,8 +417,8 @@ const groupedComponents = computed(() => {
             <div
                 class="border-t bg-muted/30 px-3 py-2 text-[10px] text-muted-foreground"
             >
-                <span class="font-medium">12 Core Components:</span> Consumed
-                dynamically from API Registry.
+                <span class="font-medium">Drag-and-Drop:</span> Drag any item to
+                canvas or click to append.
             </div>
         </aside>
     </TooltipProvider>

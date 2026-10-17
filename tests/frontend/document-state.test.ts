@@ -1,0 +1,155 @@
+import { describe, expect, it } from 'vitest';
+import {
+    createDefaultDocument,
+    createNodeId,
+    useDocumentState,
+} from '@/composables/useDocumentState';
+import { DOCUMENT_LIMITS, type DocumentSchema } from '@/types/document';
+
+describe('useDocumentState', () => {
+    it('creates a valid default document conforming to Schema v1', () => {
+        const doc = createDefaultDocument();
+
+        expect(doc.schemaVersion).toBe(1);
+        expect(doc.root).toBeDefined();
+        expect(doc.root.id).toBe('root_section_default');
+        expect(doc.root.type).toBe('Section');
+        expect(doc.root.children).toBeDefined();
+        expect(doc.root.children!.length).toBeGreaterThanOrEqual(1);
+        expect(doc.root.children![0].type).toBe('Container');
+    });
+
+    it('generates valid node IDs conforming to NODE_ID_REGEX', () => {
+        for (let i = 0; i < 20; i++) {
+            const id = createNodeId('Heading');
+            expect(id).toMatch(DOCUMENT_LIMITS.NODE_ID_REGEX);
+            expect(id.length).toBeGreaterThanOrEqual(3);
+            expect(id.length).toBeLessThanOrEqual(64);
+        }
+    });
+
+    it('inserts a component inside a container and selects it', () => {
+        const { document, selectedNodeId, insertNode, findNode } = useDocumentState();
+
+        const containerId = document.value.root.children![0].id;
+        const res = insertNode('Heading', containerId, 'inside');
+
+        expect(res.success).toBe(true);
+        expect(selectedNodeId.value).toBeDefined();
+
+        const inserted = findNode(selectedNodeId.value!);
+        expect(inserted).not.toBeNull();
+        expect(inserted?.node.type).toBe('Heading');
+        expect(inserted?.node.props.text).toBe('New Heading');
+        expect(inserted?.parent?.id).toBe(containerId);
+    });
+
+    it('rejects inserting inside a leaf component', () => {
+        const { document, insertNode } = useDocumentState();
+
+        const containerId = document.value.root.children![0].id;
+        const res1 = insertNode('Button', containerId, 'inside');
+        expect(res1.success).toBe(true);
+
+        const buttonId = document.value.root.children![0].children![0].id;
+        const res2 = insertNode('Heading', buttonId, 'inside');
+
+        expect(res2.success).toBe(false);
+        expect(res2.error).toContain('leaf component');
+    });
+
+    it('cannot delete or move the root node', () => {
+        const { document, deleteNode, moveNodeRelative } = useDocumentState();
+
+        const delRes = deleteNode(document.value.root.id);
+        expect(delRes.success).toBe(false);
+        expect(delRes.error).toContain('root node cannot be deleted');
+
+        const moveRes = moveNodeRelative(document.value.root.id, 'up');
+        expect(moveRes.success).toBe(false);
+        expect(moveRes.error).toContain('root node cannot be moved');
+    });
+
+    it('deletes a non-root node correctly', () => {
+        const { document, insertNode, deleteNode, findNode } = useDocumentState();
+
+        const containerId = document.value.root.children![0].id;
+        insertNode('Button', containerId, 'inside');
+        const buttonNode = document.value.root.children![0].children![0];
+
+        expect(findNode(buttonNode.id)).not.toBeNull();
+
+        const delRes = deleteNode(buttonNode.id);
+        expect(delRes.success).toBe(true);
+        expect(findNode(buttonNode.id)).toBeNull();
+    });
+
+    it('duplicates a node and all subnodes with unique new IDs', () => {
+        const { document, insertNode, duplicateNode, findNode } = useDocumentState();
+
+        const containerId = document.value.root.children![0].id;
+        insertNode('Hero', containerId, 'inside');
+        const heroNode = document.value.root.children![0].children![0];
+
+        insertNode('Heading', heroNode.id, 'inside');
+        const headingNode = heroNode.children![0];
+
+        const dupRes = duplicateNode(heroNode.id);
+        expect(dupRes.success).toBe(true);
+
+        const container = findNode(containerId)!.node;
+        expect(container.children!.length).toBe(2);
+
+        const clonedHero = container.children![1];
+        expect(clonedHero.id).not.toBe(heroNode.id);
+        expect(clonedHero.type).toBe('Hero');
+        expect(clonedHero.children!.length).toBe(1);
+
+        const clonedHeading = clonedHero.children![0];
+        expect(clonedHeading.id).not.toBe(headingNode.id);
+        expect(clonedHeading.type).toBe('Heading');
+    });
+
+    it('prevents cycle when moving a container into itself or its descendants', () => {
+        const { document, insertNode, moveNode } = useDocumentState();
+
+        const containerId = document.value.root.children![0].id;
+        insertNode('Columns', containerId, 'inside');
+        const columnsNode = document.value.root.children![0].children![0];
+
+        insertNode('CardGrid', columnsNode.id, 'inside');
+        const cardGridNode = columnsNode.children![0];
+
+        // Attempt to move columns into cardGrid (its own descendant)
+        const moveRes = moveNode(columnsNode.id, cardGridNode.id, 0);
+        expect(moveRes.success).toBe(false);
+        expect(moveRes.error).toContain('descendants');
+    });
+
+    it('updates node props cleanly', () => {
+        const { document, insertNode, updateNodeProps, findNode } = useDocumentState();
+
+        const containerId = document.value.root.children![0].id;
+        insertNode('Heading', containerId, 'inside');
+        const headingNode = document.value.root.children![0].children![0];
+
+        const updateRes = updateNodeProps(headingNode.id, {
+            text: 'Updated Custom Title',
+            level: 1,
+            align: 'center',
+        });
+
+        expect(updateRes.success).toBe(true);
+        const updated = findNode(headingNode.id)!.node;
+        expect(updated.props.text).toBe('Updated Custom Title');
+        expect(updated.props.level).toBe(1);
+        expect(updated.props.align).toBe('center');
+    });
+
+    it('enforces maximum tree depth and total node budget', () => {
+        const { document, insertNode, getMaxDepth, countNodes } = useDocumentState();
+
+        expect(getMaxDepth()).toBe(2);
+        expect(countNodes()).toBe(2);
+    });
+});

@@ -9,7 +9,9 @@ import {
     PanelLeftOpen,
     PanelRightClose,
     PanelRightOpen,
+    Redo2,
     Save,
+    Undo2,
     UploadCloud,
 } from '@lucide/vue';
 import { Badge } from '@/components/ui/badge';
@@ -37,20 +39,30 @@ interface PageSummary {
     updated_at?: string | null;
 }
 
-const props = defineProps<{
-    website: WebsiteSummary;
-    page: PageSummary;
-    viewport: ViewportMode;
-    leftSidebarOpen: boolean;
-    rightPanelOpen: boolean;
-    userRole: string;
-    canEdit: boolean;
-}>();
+const props = withDefaults(
+    defineProps<{
+        website: WebsiteSummary;
+        page: PageSummary;
+        viewport: ViewportMode;
+        leftSidebarOpen: boolean;
+        rightPanelOpen: boolean;
+        userRole: string;
+        canEdit: boolean;
+        canUndo?: boolean;
+        canRedo?: boolean;
+    }>(),
+    {
+        canUndo: false,
+        canRedo: false,
+    },
+);
 
 const emit = defineEmits<{
     (e: 'update:viewport', value: ViewportMode): void;
     (e: 'toggleLeftSidebar'): void;
     (e: 'toggleRightPanel'): void;
+    (e: 'undo'): void;
+    (e: 'redo'): void;
 }>();
 
 const getStatusBadge = (status: string) => {
@@ -80,7 +92,7 @@ const getStatusBadge = (status: string) => {
 <template>
     <TooltipProvider :delay-duration="200">
         <header
-            class="flex h-13 w-full shrink-0 items-center justify-between border-b bg-background px-3 sm:px-4"
+            class="flex h-13 w-full shrink-0 items-center justify-between border-b bg-background px-3 select-none sm:px-4"
         >
             <!-- Left Area: Navigation & Page Identity -->
             <div class="flex items-center gap-2 sm:gap-3">
@@ -166,8 +178,50 @@ const getStatusBadge = (status: string) => {
                 </div>
             </div>
 
-            <!-- Center Area: Viewport Switcher -->
-            <div class="flex items-center justify-center">
+            <!-- Center Area: Viewport Switcher & History Actions -->
+            <div class="flex items-center gap-3">
+                <!-- Undo / Redo Actions -->
+                <div class="flex items-center gap-0.5">
+                    <Tooltip>
+                        <TooltipTrigger as-child>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                :disabled="!canEdit || !canUndo"
+                                class="h-8 w-8"
+                                aria-label="Undo"
+                                @click="emit('undo')"
+                            >
+                                <Undo2 class="h-3.5 w-3.5" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">
+                            <p class="text-xs">Undo (Ctrl+Z)</p>
+                        </TooltipContent>
+                    </Tooltip>
+
+                    <Tooltip>
+                        <TooltipTrigger as-child>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                :disabled="!canEdit || !canRedo"
+                                class="h-8 w-8"
+                                aria-label="Redo"
+                                @click="emit('redo')"
+                            >
+                                <Redo2 class="h-3.5 w-3.5" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">
+                            <p class="text-xs">Redo (Ctrl+Y or Ctrl+Shift+Z)</p>
+                        </TooltipContent>
+                    </Tooltip>
+                </div>
+
+                <div class="hidden h-4 w-px bg-border sm:block" />
+
+                <!-- Viewport Switcher -->
                 <ViewportSwitcher
                     :model-value="viewport"
                     @update:model-value="emit('update:viewport', $event)"
@@ -230,7 +284,7 @@ const getStatusBadge = (status: string) => {
 
                 <div class="h-4 w-px bg-border" />
 
-                <!-- Action Button Placeholders: Explicitly disabled per Phase 04 requirements -->
+                <!-- Action Button Placeholders: Explicitly disabled per Phase 04/05 non-goals -->
                 <Tooltip>
                     <TooltipTrigger as-child>
                         <Button

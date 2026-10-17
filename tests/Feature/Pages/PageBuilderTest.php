@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Pages;
 
+use App\Domains\DocumentEngine\Validation\DocumentValidator;
 use App\Enums\PageStatus;
 use App\Enums\WebsiteRole;
 use App\Models\Page;
@@ -150,5 +151,54 @@ class PageBuilderTest extends TestCase
                 ->where('page.id', $page->id)
                 ->where('can.edit', true)
             );
+    }
+
+    public function test_default_editor_document_is_fully_valid_with_server_validator(): void
+    {
+        $validator = new DocumentValidator;
+
+        $defaultDoc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_section_default',
+                'type' => 'Section',
+                'props' => [
+                    'padding' => 'medium',
+                    'background' => 'transparent',
+                ],
+                'children' => [
+                    [
+                        'id' => 'node_container_default',
+                        'type' => 'Container',
+                        'props' => [
+                            'maxWidth' => 'lg',
+                            'centered' => true,
+                        ],
+                        'children' => [],
+                    ],
+                ],
+            ],
+            'pageSettings' => [
+                'title' => 'New Page',
+                'description' => '',
+            ],
+        ];
+
+        $result = $validator->validate($defaultDoc);
+
+        $this->assertTrue($result->isValid());
+        $this->assertEmpty($result->getErrors());
+    }
+
+    public function test_twelve_components_fixture_is_fully_valid_with_server_validator(): void
+    {
+        $validator = new DocumentValidator;
+        $fixturePath = base_path('tests/Fixtures/Documents/all_twelve_components.json');
+        $rawJson = file_get_contents($fixturePath);
+
+        $result = $validator->validate($rawJson);
+
+        $this->assertTrue($result->isValid());
+        $this->assertEmpty($result->getErrors());
     }
 }

@@ -19,6 +19,8 @@ Ghi quyết định đã được xác nhận. Các ý trong ADR ở trạng th�
 | 2026-10-17 | D-013 | Separation of Page Metadata Route (`/edit`) and Visual Editor (`/builder`) | Keep `/edit` for page metadata form and create dedicated full-screen `/builder` (alias `/editor`) | Preserves Phase 02 metadata flow; provides dedicated SaaS canvas layout | User / Architect |
 | 2026-10-17 | D-014 | Viewport Switcher Architecture (Desktop 1280px, Tablet 768px, Mobile 375px) | Centralized presets config in `editor.ts` with ARIA radiogroup | Smooth frame transitions without modifying document schema or DB | User / Architect |
 | 2026-10-17 | D-015 | Dynamic API Component Library Loading with Boundary Validation | Consume `GET /api/components/registry` dynamically with loading skeleton and error retry | Zero hardcoded list in frontend; single source of truth in backend registry | User / Architect |
+| 2026-10-17 | D-016 | Native HTML5 Drag-and-Drop with Accessible Click-to-Insert | Avoid heavy DnD dependencies; use browser native DnD API + click-to-insert | Zero bundle bloat (<1KB); guaranteed accessibility for keyboard users | User / Architect |
+| 2026-10-17 | D-017 | Bounded Immutable Snapshot Stack for Undo/Redo | Document size <=250 nodes (20-50KB); deep-clone stack capped at 30 entries | Zero mutation/inversion bugs, <0.1ms cloning time, <1MB RAM client memory | User / Architect |
 
 ## Template
 ### D-XXX — Short title

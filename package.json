@@ -8,7 +8,8 @@
         "dev": "vp dev",
         "check": "vp check resources",
         "check:fix": "vp check --fix resources",
-        "types:check": "vue-tsc --noEmit"
+        "types:check": "vue-tsc --noEmit",
+        "test:frontend": "vp test --run"
     },
     "dependencies": {
         "@inertiajs/vite": "^3.0.0",

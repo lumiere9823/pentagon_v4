@@ -1,7 +1,7 @@
 # Implementation Status
 
 **Last updated:** 2026-10-17  
-**Current phase:** Phase 04 — Design System & Editor Shell (Completed) / Ready for Phase 05  
+**Current phase:** Phase 05 — Visual Editing Core (Completed) / Ready for Phase 06  
 **Overall status:** In progress
 
 ## Status legend
@@ -19,8 +19,8 @@
 | 02 — Identity & website management | DONE | Migrations, Models, Policies, UI, IDOR tests, 64/64 Pest tests passed, Vite build passed | None | Tech Lead |
 | 03 — Document engine & registry | DONE | Schema v1, 12 Core Components, Recursive DocumentValidator, HtmlSanitizer (symfony/html-sanitizer), 91/91 Pest tests passed, Pint & TS pass, Vite build pass | None | Tech Lead |
 | 04 — Design system & editor shell | DONE | Editor Shell layout, Viewport Switcher (Desktop/Tablet/Mobile), Component Library via API registry, Canvas & Inspector placeholders, 98/98 Pest tests passed, Pint & TS pass, Vite build pass | None | Tech Lead |
-| 05 — Visual editing core | NOT STARTED | Ready to implement | None | Tech Lead |
-| 06 — Responsive, media & templates | NOT STARTED | | | |
+| 05 — Visual editing core | DONE | Client document state, 12 renderers, schema-driven inspector, bounded undo-redo, native DnD/click-to-insert, 100/100 Pest, 13/13 Vitest, Pint & TS pass, Vite build pass | None | Tech Lead |
+| 06 — Responsive, media & templates | NOT STARTED | Ready to implement | | |
 | 07 — Persistence & revisions | NOT STARTED | | | |
 | 08 — Preview & publishing | NOT STARTED | | | |
 | 09 — Dynamic content & SEO | NOT STARTED | | | |
@@ -59,6 +59,14 @@
 | P04-04 | Center Canvas & Inspector Shell | DONE | Responsive canvas width transition (1280px, 768px, 375px), unselected inspector state, Phase 05 placeholders | Overflow-safe layout |
 | P04-05 | Navigation & Cross-screen Linking | DONE | Seamless bi-directional navigation from `Websites/Show.vue` and `Pages/Edit.vue` into `Pages/Builder.vue` | Non-destructive integration |
 | P04-06 | Feature Tests & Quality Gates | DONE | `PageBuilderTest` (7 tests), 98/98 Pest tests pass, Pint pass, TypeScript pass, Vite build pass | All quality gates verified |
+| P05-01 | Client-Side Document State & Tree Mutation Engine | DONE | `useDocumentState.ts` with insert, updateProps, delete, duplicate, move, depth/node limit invariants | Reactive selection & error handling |
+| P05-02 | Bounded Immutable Snapshot History (Undo/Redo) | DONE | `useEditorHistory.ts` capped at 30 snapshots, 300ms debounce, Ctrl+Z / Ctrl+Y shortcuts, form field avoidance | Zero memory leaks |
+| P05-03 | Client-Side DOM Sanitizer for RichText | DONE | `domSanitizer.ts` with browser DOMParser, tag/attribute allowlist, javascript:/data: neutralization | Consistent with backend HtmlSanitizer |
+| P05-04 | Recursive Canvas Renderer & Error Boundary | DONE | `NodeRenderer.vue` with `onErrorCaptured` isolation, visual active selection ring, hover states | Safe fallback for corrupted nodes |
+| P05-05 | 12 Core Component Renderers | DONE | Section, Container, Heading, RichText, Image, Button, Hero, Columns, CardGrid, FAQ, Spacer, Divider | Native interactive behavior & click prevention |
+| P05-06 | Floating Action Toolbar & Drop Indicators | DONE | `NodeToolbar.vue` (Move Up, Move Down, Duplicate, Delete) + `DropZone.vue` (insertion line & empty state) | Clean visual guidance |
+| P05-07 | Dynamic Schema-Driven Inspector Panel | DONE | `InspectorPanel.vue` rendering categorized controls (Content, Style, Settings) from component registry schema | Real-time prop two-way sync |
+| P05-08 | Automated Test Suites & Quality Gates | DONE | 13/13 Vitest frontend tests, 100/100 Pest tests, Pint pass, TypeScript pass, Vite production build pass | Full compliance across all quality gates |
 
 ## Gate before moving to next phase
 - [x] All phase acceptance criteria passed.
