@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\MediaAssetController;
 use App\Http\Controllers\PageController;
 use App\Http\Controllers\WebsiteController;
 use App\Http\Controllers\WebsiteMembershipController;
@@ -17,6 +18,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('websites/{website}/memberships', [WebsiteMembershipController::class, 'store'])->name('websites.memberships.store');
     Route::put('websites/{website}/memberships/{membership}', [WebsiteMembershipController::class, 'update'])->name('websites.memberships.update');
     Route::delete('websites/{website}/memberships/{membership}', [WebsiteMembershipController::class, 'destroy'])->name('websites.memberships.destroy');
+
+    // Media Library
+    Route::get('websites/{website}/media', [MediaAssetController::class, 'index'])->name('websites.media.index');
+    Route::post('websites/{website}/media', [MediaAssetController::class, 'store'])->name('websites.media.store');
+    Route::put('websites/{website}/media/{mediaAsset}', [MediaAssetController::class, 'update'])->name('websites.media.update');
+    Route::delete('websites/{website}/media/{mediaAsset}', [MediaAssetController::class, 'destroy'])->name('websites.media.destroy');
 
     // Pages management
     Route::get('websites/{website}/pages/create', [PageController::class, 'create'])->name('websites.pages.create');

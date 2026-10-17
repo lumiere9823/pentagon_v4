@@ -70,6 +70,14 @@ class Website extends Model
     }
 
     /**
+     * @return HasMany<MediaAsset, $this>
+     */
+    public function mediaAssets(): HasMany
+    {
+        return $this->hasMany(MediaAsset::class);
+    }
+
+    /**
      * Check if user is a member with optional specific roles.
      *
      * @param  list<WebsiteRole|string>  $roles

@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import {
     AlertCircle,
     Copy,
+    Image as ImageIcon,
     Info,
     Link as LinkIcon,
     MousePointer,
@@ -13,6 +14,7 @@ import {
     SlidersHorizontal,
     Trash2,
 } from '@lucide/vue';
+import MediaLibraryModal from '@/components/media/MediaLibraryModal.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -41,6 +43,7 @@ import type {
     DocumentNode,
     ViewportMode,
 } from '@/types/document';
+import type { MediaAssetItem } from '@/types/media';
 
 const props = withDefaults(
     defineProps<{
@@ -49,12 +52,14 @@ const props = withDefaults(
         readOnly?: boolean;
         isRoot?: boolean;
         currentViewport?: ViewportMode;
+        websiteId?: number;
     }>(),
     {
         componentMetadata: null,
         readOnly: false,
         isRoot: false,
         currentViewport: 'desktop',
+        websiteId: undefined,
     },
 );
 
@@ -212,6 +217,31 @@ const handlePropChange = (key: string, value: unknown) => {
         });
     } else {
         emit('updateProp', { key, value: resolvedValue });
+    }
+};
+
+// Media Library Picker state and handlers
+const isMediaModalOpen = ref(false);
+
+const openMediaLibrary = () => {
+    isMediaModalOpen.value = true;
+};
+
+const handleMediaSelect = (asset: MediaAssetItem) => {
+    if (!props.selectedNode) return;
+
+    // 1. Write canonical public URL to src
+    handlePropChange('src', asset.url);
+
+    // 2. D-020: Auto-fill alt only when existing alt value is empty
+    const currentAlt = props.selectedNode.props.alt;
+    const isAltEmpty =
+        currentAlt === undefined ||
+        currentAlt === null ||
+        String(currentAlt).trim() === '';
+
+    if (isAltEmpty && asset.alt_text) {
+        handlePropChange('alt', asset.alt_text);
     }
 };
 
@@ -565,12 +595,30 @@ const removeFaqItem = (index: number) => {
 
                             <!-- URL Input -->
                             <div v-else-if="schema.isUrl" class="space-y-1">
-                                <Label
-                                    :for="`prop-${key}`"
-                                    class="text-xs font-medium"
-                                >
-                                    {{ formatPropLabel(key) }}
-                                </Label>
+                                <div class="flex items-center justify-between">
+                                    <Label
+                                        :for="`prop-${key}`"
+                                        class="text-xs font-medium"
+                                    >
+                                        {{ formatPropLabel(key) }}
+                                    </Label>
+                                    <Button
+                                        v-if="
+                                            selectedNode.type === 'Image' &&
+                                            key === 'src' &&
+                                            websiteId
+                                        "
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        class="h-6 gap-1 px-2 text-[11px]"
+                                        :disabled="readOnly"
+                                        @click="openMediaLibrary"
+                                    >
+                                        <ImageIcon class="h-3 w-3" />
+                                        Choose from Library
+                                    </Button>
+                                </div>
                                 <div class="relative">
                                     <LinkIcon
                                         class="absolute top-2.5 left-2.5 h-3.5 w-3.5 text-muted-foreground"
@@ -1038,5 +1086,14 @@ const removeFaqItem = (index: number) => {
                 </div>
             </template>
         </TooltipProvider>
+
+        <!-- Media Library Picker Modal -->
+        <MediaLibraryModal
+            v-if="websiteId"
+            v-model:open="isMediaModalOpen"
+            :website-id="websiteId"
+            :can-manage="!readOnly"
+            @select="handleMediaSelect"
+        />
     </aside>
 </template>

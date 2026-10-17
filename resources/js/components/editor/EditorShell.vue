@@ -392,6 +392,7 @@ const handleResetStyle = (payload: {
                     :read-only="!can.edit"
                     :is-root="selectedNode?.id === document.root.id"
                     :current-viewport="viewport"
+                    :website-id="website.id"
                     @update-prop="handleUpdateProp"
                     @update-style="handleUpdateStyle"
                     @reset-style="handleResetStyle"

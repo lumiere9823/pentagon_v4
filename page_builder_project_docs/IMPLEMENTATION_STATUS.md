@@ -20,7 +20,7 @@
 | 03 — Document engine & registry | DONE | Schema v1, 12 Core Components, Recursive DocumentValidator, HtmlSanitizer (symfony/html-sanitizer), 91/91 Pest tests passed, Pint & TS pass, Vite build pass | None | Tech Lead |
 | 04 — Design system & editor shell | DONE | Editor Shell layout, Viewport Switcher (Desktop/Tablet/Mobile), Component Library via API registry, Canvas & Inspector placeholders, 98/98 Pest tests passed, Pint & TS pass, Vite build pass | None | Tech Lead |
 | 05 — Visual editing core | DONE | Client document state, 12 renderers, dynamic inspector, bounded undo-redo, native DnD. Phase 05 Audit complete; F-01 to F-06 remediated; 46 Vitest tests pass | None | Tech Lead |
-| 06 — Responsive, media & templates | IN PROGRESS | Sprint 1 (Responsive Styling) complete: DocumentValidator, cascade resolver, state mutations, Inspector controls, Canvas simulation. 107 Pest tests pass, 61 Vitest tests pass, Pint pass, Vite build pass | None | Tech Lead |
+| 06 — Responsive, media & templates | IN PROGRESS | Sprint 1 (Responsive Styling) & Sprint 2 (Media Library) complete. 121 Pest tests pass, 71 Vitest tests pass, Pint pass, Vite build pass | None | Tech Lead |
 | 07 — Persistence & revisions | NOT STARTED | | | |
 | 08 — Preview & publishing | NOT STARTED | | | |
 | 09 — Dynamic content & SEO | NOT STARTED | | | |
@@ -73,6 +73,11 @@
 | P06-03 | Document State Mutations & History Isolation | DONE | `updateNodeStyle`, `resetNodeStyle`, deep clone `styles`, atomic undo/redo | Vitest tests passed |
 | P06-04 | Inspector Responsive Styling Controls | DONE | `InspectorPanel.vue` viewport banner, override badges, reset buttons, display visibility control | Vitest & Biome passed |
 | P06-05 | Canvas & Renderer Active Viewport Resolution | DONE | `NodeRenderer.vue` dynamic responsive props, dashed ring & badge for hidden components | Vitest & Vite build passed |
+| P06-06 | Media Data Model & Migration | DONE | `create_media_assets_table`, `MediaAsset.php` model with soft deletes, website relationship & factory | Database migration passed |
+| P06-07 | Upload & Binary MIME Security Service | DONE | `MediaStorageService.php` enforcing 5MB limit, 4096px bounds, finfo binary sniffing, getimagesize header verification, SVG rejection | Pest 14/14 tests passed |
+| P06-08 | Reference Guard & Safe Deletion Scanner | DONE | `MediaUsageScanner.php` checking document sources, exact path matching, 422 `media_in_use` prevention | Pest unit/feature passed |
+| P06-09 | Media REST Endpoints & RBAC Policy | DONE | `MediaAssetController.php` (index, store, update, destroy) + `MediaAssetPolicy.php` enforcing owner/editor write, viewer read-only | IDOR 404 & viewer 403 verified |
+| P06-10 | Frontend Media Library & Inspector Integration | DONE | `MediaLibraryModal`, `MediaGrid`, `MediaCard`, `MediaUploadDropzone`, `MediaDetailsPanel`, `InspectorPanel` integration | 71 Vitest tests passed |
 
 ## Gate before moving to next phase
 - [x] All phase acceptance criteria passed.
