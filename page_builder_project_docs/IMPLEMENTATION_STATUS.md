@@ -1,7 +1,7 @@
 # Implementation Status
 
-**Last updated:** 2026-10-16  
-**Current phase:** Phase 02 — Identity & Website Management  
+**Last updated:** 2026-10-17  
+**Current phase:** Phase 03 — Document Engine & Registry (Completed) / Ready for Phase 04  
 **Overall status:** In progress
 
 ## Status legend
@@ -17,8 +17,8 @@
 | 00 — Discovery & feasibility | DONE | Discovery report approved by user | None | Tech Lead |
 | 01 — Foundation & CI | DONE | Git init, Laravel 13/Vue 3/TS skeleton, PostgreSQL setup, Pint (pass), Vue linter (pass), 43/43 Pest tests passed, production build passed | None | Tech Lead |
 | 02 — Identity & website management | DONE | Migrations, Models, Policies, UI, IDOR tests, 64/64 Pest tests passed, Vite build passed | None | Tech Lead |
-| 03 — Document engine & registry | NOT STARTED | Ready to implement | None | Tech Lead |
-| 04 — Design system & editor shell | NOT STARTED | | | |
+| 03 — Document engine & registry | DONE | Schema v1, 12 Core Components, Recursive DocumentValidator, HtmlSanitizer (symfony/html-sanitizer), 91/91 Pest tests passed, Pint & TS pass, Vite build pass | None | Tech Lead |
+| 04 — Design system & editor shell | NOT STARTED | Ready to implement | None | Tech Lead |
 | 05 — Visual editing core | NOT STARTED | | | |
 | 06 — Responsive, media & templates | NOT STARTED | | | |
 | 07 — Persistence & revisions | NOT STARTED | | | |
@@ -47,6 +47,12 @@
 | P02-04 | Controllers & Web routes | DONE | `WebsiteController`, `WebsiteMembershipController`, `PageController` | 14 RESTful routes |
 | P02-05 | Inertia Vue 3 UI management | DONE | `Websites/Index`, `Create`, `Show`, `Pages/Create`, `Edit` | Tailwind v4 + TypeScript |
 | P02-06 | Security & Regression testing | DONE | 64/64 Pest tests passed, 222 assertions | IDOR & invariant covered |
+| P03-01 | Document JSON Schema v1 & Node Contract | DONE | Schema v1 with metadata, root node, node ID rules `/^[a-zA-Z0-9_-]{3,64}$/` | TypeScript types in `document.ts` |
+| P03-02 | Component Registry & 12 Core Components | DONE | `ComponentRegistry` with 12 core components, aliases, prop schemas | Route `GET /api/components/registry` |
+| P03-03 | Recursive Document Validator & Hard Resource Limits | DONE | `DocumentValidator` enforcing 512KB, 10 depth, 250 nodes, 50 children | Path-based structured validation errors |
+| P03-04 | HTML / RichText Sanitizer against XSS | DONE | `HtmlSanitizer` via `symfony/html-sanitizer`, safe URL protocol checks | Script, onerror, javascript: & data: neutralized |
+| P03-05 | JSON Fixtures & Unit Test Suite | DONE | `minimal_valid.json`, `all_twelve_components.json`, 27 unit tests | All component prop & error cases covered |
+| P03-06 | Feature Tests & Quality Gates | DONE | `ComponentRegistryApiTest`, 91/91 tests pass, Pint pass, TypeScript pass, Vite build pass | Production quality gates satisfied |
 
 ## Gate before moving to next phase
 - [x] All phase acceptance criteria passed.

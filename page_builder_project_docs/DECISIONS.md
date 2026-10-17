@@ -12,6 +12,10 @@ Ghi quyết định đã được xác nhận. Các ý trong ADR ở trạng th�
 | 2026-10-16 | D-006 | Owner Invariant & Transactional Membership Sync | Creating a website must atomically generate an owner membership | Guaranteed owner invariant; role escalation prevented via API rules | User / Architect |
 | 2026-10-16 | D-007 | Composite Unique Slug for Pages `(website_id, slug)` | Allow identical page slugs across different websites | Matches real-world CMS requirements; enforced at DB constraint level | User / Architect |
 | 2026-10-16 | D-008 | Strict 404 IDOR Abort on Route Scoping Mismatch | Return 404 instead of 403 on cross-website resource mismatches | Conceals resource existence across website boundaries; prevents enumeration | User / Architect |
+| 2026-10-17 | D-009 | Document JSON Schema v1 Specification | Unified root node tree structure with strict schemaVersion | Versioned documents, backward compatibility, clear migration pathway | User / Architect |
+| 2026-10-17 | D-010 | 12 Core Component Allowlist with Canonical Aliases | Restrict tree nodes to 12 allowed types with alias support (Rich Text, Card Grid) | Prevents arbitrary component injection; robust editor interop | User / Architect |
+| 2026-10-17 | D-011 | Server-Side Recursive Validator & Hard Limits | Enforce 512KB payload, 10 tree depth, 250 nodes, 50 children per node | Prevents ReDoS, stack overflow, DB bloat on 2GB RAM instances | User / Architect |
+| 2026-10-17 | D-012 | Symfony HTML Sanitizer for RichText XSS Prevention | Use standard W3C parser `symfony/html-sanitizer` over fragile regex | Bulletproof XSS mitigation (strips scripts, event handlers, javascript:/data: URIs) | User / Architect |
 
 ## Template
 ### D-XXX — Short title

@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "root": {
+    "id": "root_section_01",
+    "type": "Section",
+    "props": {
+      "padding": "large",
+      "background": "muted"
+    },
+    "children": [
+      {
+        "id": "node_hero_01",
+        "type": "Hero",
+        "props": {
+          "title": "Welcome to Our Platform",
+          "subtitle": "Build faster and more securely with Page Builder.",
+          "align": "center",
+          "ctaText": "Get Started",
+          "ctaUrl": "https://example.com/signup"
+        },
+        "children": []
+      },
+      {
+        "id": "node_container_01",
+        "type": "Container",
+        "props": {
+          "maxWidth": "lg",
+          "centered": true
+        },
+        "children": [
+          {
+            "id": "node_heading_01",
+            "type": "Heading",
+            "props": {
+              "text": "Core Features & Highlights",
+              "level": 2,
+              "align": "center"
+            },
+            "children": []
+          },
+          {
+            "id": "node_richtext_01",
+            "type": "RichText",
+            "props": {
+              "content": "<p>Discover our <strong>next-generation</strong> page building suite with <em>type safety</em>.</p>"
+            },
+            "children": []
+          },
+          {
+            "id": "node_spacer_01",
+            "type": "Spacer",
+            "props": {
+              "size": "medium"
+            },
+            "children": []
+          },
+          {
+            "id": "node_columns_01",
+            "type": "Columns",
+            "props": {
+              "count": 2,
+              "gap": "medium"
+            },
+            "children": [
+              {
+                "id": "node_image_01",
+                "type": "Image",
+                "props": {
+                  "src": "https://images.unsplash.com/photo-1579546929518-9e396f3cc809",
+                  "alt": "Abstract gradient background",
+                  "caption": "Photo from Unsplash",
+                  "aspectRatio": "16:9"
+                },
+                "children": []
+              },
+              {
+                "id": "node_button_01",
+                "type": "Button",
+                "props": {
+                  "label": "Read Docs",
+                  "url": "/docs",
+                  "variant": "primary",
+                  "size": "md",
+                  "target": "_self"
+                },
+                "children": []
+              }
+            ]
+          },
+          {
+            "id": "node_divider_01",
+            "type": "Divider",
+            "props": {
+              "style": "solid",
+              "color": "muted"
+            },
+            "children": []
+          },
+          {
+            "id": "node_cardgrid_01",
+            "type": "CardGrid",
+            "props": {
+              "columns": 3,
+              "gap": "medium"
+            },
+            "children": []
+          },
+          {
+            "id": "node_faq_01",
+            "type": "FAQ",
+            "props": {
+              "items": [
+                {
+                  "question": "Is it secure?",
+                  "answer": "<p>Yes, all content is sanitized with HTMLPurifier/Symfony Sanitizer.</p>"
+                },
+                {
+                  "question": "Can I publish static pages?",
+                  "answer": "<p>Yes, static HTML publishing is supported in Phase 08.</p>"
+                }
+              ]
+            },
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  "pageSettings": {
+    "title": "Home Page",
+    "description": "Production landing page showcasing all 12 core components."
+  }
+}

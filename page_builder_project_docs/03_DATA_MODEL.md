@@ -163,3 +163,54 @@ Một page có thể có published revision cũ trong khi draft revision mới h
 3. Tạo migration nhỏ, có constraints/indexes.
 4. Test migration fresh và rollback trên môi trường dev.
 5. Không chỉnh sửa migration đã chạy ở môi trường dùng chung nếu cần deployment an toàn; tạo migration mới.
+
+## 6. Document JSON Schema Version 1
+
+Document JSON Schema Version 1 là cấu trúc dữ liệu chính thức biểu diễn nội dung trang trong Page Builder.
+
+### 6.1 Top-level Structure
+```json
+{
+  "schemaVersion": 1,
+  "meta": {
+    "title": "Page Title",
+    "description": "Page SEO description",
+    "language": "vi"
+  },
+  "root": {
+    "id": "root",
+    "type": "Container",
+    "props": {},
+    "children": []
+  }
+}
+```
+
+### 6.2 Node Contract
+Mỗi node trong cây component tuân thủ:
+- `id`: chuỗi định danh duy nhất trong toàn bộ tài liệu, regex: `/^[a-zA-Z0-9_-]{3,64}$/`.
+- `type`: tên component thuộc Allowlist 12 core components.
+- `props`: dictionary các thuộc tính đã được validate theo schema của component.
+- `children`: mảng các node con (chỉ hợp lệ nếu component là container).
+
+### 6.3 12 Core Components
+1. `Section` (Container: true)
+2. `Container` (Container: true)
+3. `Heading` (Container: false)
+4. `RichText` (Container: false, alias: `Rich Text`)
+5. `Image` (Container: false)
+6. `Button` (Container: false)
+7. `Hero` (Container: true)
+8. `Columns` (Container: true)
+9. `CardGrid` (Container: true, alias: `Card Grid`)
+10. `FAQ` (Container: false)
+11. `Spacer` (Container: false)
+12. `Divider` (Container: false)
+
+### 6.4 Resource & Safety Limits
+- `MAX_PAYLOAD_BYTES`: 524,288 bytes (512 KB).
+- `MAX_TREE_DEPTH`: 10 levels.
+- `MAX_TOTAL_NODES`: 250 nodes.
+- `MAX_CHILDREN_PER_NODE`: 50 nodes.
+- `HtmlSanitizer`: Dùng `symfony/html-sanitizer` W3C parser làm sạch nội dung RichText, loại bỏ thẻ độc hại (`<script>`, `<style>`, `<iframe>`), thuộc tính inline handler (`onclick`, `onerror`), và các URL schemes nguy hiểm (`javascript:`, `data:`).
+

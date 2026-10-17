@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "root": {
+    "id": "root_sec_01",
+    "type": "Section",
+    "props": {
+      "padding": "medium",
+      "background": "transparent"
+    },
+    "children": []
+  }
+}
