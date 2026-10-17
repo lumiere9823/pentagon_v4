@@ -1,7 +1,7 @@
 # Implementation Status
 
 **Last updated:** 2026-10-17  
-**Current phase:** Phase 05 — Visual Editing Core (Completed) / Ready for Phase 06  
+**Current phase:** Phase 05 (Audited & Verified; 5 defects scheduled for Phase 06 Sprint 0) / Ready for Phase 06  
 **Overall status:** In progress
 
 ## Status legend
@@ -19,8 +19,8 @@
 | 02 — Identity & website management | DONE | Migrations, Models, Policies, UI, IDOR tests, 64/64 Pest tests passed, Vite build passed | None | Tech Lead |
 | 03 — Document engine & registry | DONE | Schema v1, 12 Core Components, Recursive DocumentValidator, HtmlSanitizer (symfony/html-sanitizer), 91/91 Pest tests passed, Pint & TS pass, Vite build pass | None | Tech Lead |
 | 04 — Design system & editor shell | DONE | Editor Shell layout, Viewport Switcher (Desktop/Tablet/Mobile), Component Library via API registry, Canvas & Inspector placeholders, 98/98 Pest tests passed, Pint & TS pass, Vite build pass | None | Tech Lead |
-| 05 — Visual editing core | DONE | Client document state, 12 renderers, schema-driven inspector, bounded undo-redo, native DnD/click-to-insert, 100/100 Pest, 13/13 Vitest, Pint & TS pass, Vite build pass | None | Tech Lead |
-| 06 — Responsive, media & templates | NOT STARTED | Ready to implement | | |
+| 05 — Visual editing core | DONE | Client document state, 12 renderers, dynamic inspector, bounded undo-redo, native DnD. Phase 05 Audit complete (`PHASE_05_TECHNICAL_AUDIT.md`); 5 defects scheduled for Phase 06 Sprint 0 | None | Tech Lead |
+| 06 — Responsive, media & templates | NOT STARTED | Technical plan prepared (`PHASE_06_BA_TECHNICAL_PLAN.md`) | Awaiting approval | |
 | 07 — Persistence & revisions | NOT STARTED | | | |
 | 08 — Preview & publishing | NOT STARTED | | | |
 | 09 — Dynamic content & SEO | NOT STARTED | | | |
