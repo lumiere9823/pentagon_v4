@@ -152,4 +152,62 @@ describe('useDocumentState', () => {
         expect(getMaxDepth()).toBe(2);
         expect(countNodes()).toBe(2);
     });
+
+    it('F-05: inserts a component at specified targetIndex (beginning, middle, end)', () => {
+        const { document, insertNode, findNode } = useDocumentState();
+        const containerId = document.value.root.children![0].id;
+
+        // Insert first node: Button A
+        insertNode('Button', containerId, 'inside', { label: 'Button A' });
+        // Insert second node: Button B (appended)
+        insertNode('Button', containerId, 'inside', { label: 'Button B' });
+
+        const container = findNode(containerId)!.node;
+        expect(container.children!.length).toBe(2);
+        expect(container.children![0].props.label).toBe('Button A');
+        expect(container.children![1].props.label).toBe('Button B');
+
+        // Insert at beginning (index 0): Heading
+        const resStart = insertNode('Heading', containerId, 'inside', { text: 'Start' }, 0);
+        expect(resStart.success).toBe(true);
+        expect(container.children![0].props.text).toBe('Start');
+        expect(container.children![1].props.label).toBe('Button A');
+        expect(container.children![2].props.label).toBe('Button B');
+
+        // Insert in middle (index 2): Divider
+        const resMid = insertNode('Divider', containerId, 'inside', {}, 2);
+        expect(resMid.success).toBe(true);
+        expect(container.children![1].props.label).toBe('Button A');
+        expect(container.children![2].type).toBe('Divider');
+        expect(container.children![3].props.label).toBe('Button B');
+
+        // Insert at end (index 4 or greater): Spacer
+        const resEnd = insertNode('Spacer', containerId, 'inside', {}, 99);
+        expect(resEnd.success).toBe(true);
+        expect(container.children![4].type).toBe('Spacer');
+    });
+
+    it('F-06: clears selection when deleting a container whose descendant is currently selected', () => {
+        const { document, insertNode, deleteNode, selectNode, selectedNodeId } = useDocumentState();
+        const containerId = document.value.root.children![0].id;
+
+        // Insert Columns container inside default container
+        insertNode('Columns', containerId, 'inside');
+        const columnsNode = document.value.root.children![0].children![0];
+
+        // Insert Button inside Columns
+        insertNode('Button', columnsNode.id, 'inside');
+        const buttonNode = columnsNode.children![0];
+
+        // Select the deeply nested Button
+        selectNode(buttonNode.id);
+        expect(selectedNodeId.value).toBe(buttonNode.id);
+
+        // Delete the parent Columns container
+        const delRes = deleteNode(columnsNode.id);
+        expect(delRes.success).toBe(true);
+
+        // Selection MUST be cleared because selected node was inside the deleted subtree
+        expect(selectedNodeId.value).toBeNull();
+    });
 });

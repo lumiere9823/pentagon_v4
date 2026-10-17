@@ -25,6 +25,10 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
+import {
+    coercePropValue,
+    type PropSchemaDefinition,
+} from '@/lib/inspectorHelpers';
 import type { ComponentMetadata, DocumentNode } from '@/types/document';
 
 const props = withDefaults(
@@ -32,10 +36,12 @@ const props = withDefaults(
         selectedNode: DocumentNode | null;
         componentMetadata?: ComponentMetadata | null;
         readOnly?: boolean;
+        isRoot?: boolean;
     }>(),
     {
         componentMetadata: null,
         readOnly: false,
+        isRoot: false,
     },
 );
 
@@ -136,7 +142,9 @@ watch(
 
 const handlePropChange = (key: string, value: unknown) => {
     if (props.readOnly) return;
-    emit('updateProp', { key, value });
+    const schema = propSchemas.value[key] as PropSchemaDefinition | undefined;
+    const resolvedValue = coercePropValue(schema, value);
+    emit('updateProp', { key, value: resolvedValue });
 };
 
 // FAQ Item Repeater handlers
@@ -213,13 +221,7 @@ const removeFaqItem = (index: number) => {
 
                 <div class="flex items-center gap-0.5">
                     <!-- Quick Duplicate -->
-                    <Tooltip
-                        v-if="
-                            selectedNode &&
-                            selectedNode.id !== 'root' &&
-                            !readOnly
-                        "
-                    >
+                    <Tooltip v-if="selectedNode && !isRoot && !readOnly">
                         <TooltipTrigger as-child>
                             <Button
                                 variant="ghost"
@@ -237,13 +239,7 @@ const removeFaqItem = (index: number) => {
                     </Tooltip>
 
                     <!-- Quick Delete -->
-                    <Tooltip
-                        v-if="
-                            selectedNode &&
-                            selectedNode.id !== 'root' &&
-                            !readOnly
-                        "
-                    >
+                    <Tooltip v-if="selectedNode && !isRoot && !readOnly">
                         <TooltipTrigger as-child>
                             <Button
                                 variant="ghost"
@@ -739,7 +735,7 @@ const removeFaqItem = (index: number) => {
 
                 <!-- Footer: Quick Actions (if not Root) -->
                 <div
-                    v-if="!readOnly && selectedNode.id !== 'root'"
+                    v-if="!readOnly && selectedNode && !isRoot"
                     class="flex items-center gap-2 border-t bg-muted/10 p-3"
                 >
                     <Button

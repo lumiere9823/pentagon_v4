@@ -175,6 +175,7 @@ export function useDocumentState(initialDoc?: DocumentSchema) {
         targetId?: string | null,
         position: InsertPosition = 'inside',
         customProps?: Record<string, unknown>,
+        targetIndex?: number,
     ): TreeMutationResult {
         lastError.value = null;
 
@@ -195,7 +196,13 @@ export function useDocumentState(initialDoc?: DocumentSchema) {
             // Default: append into root
             destContainer = document.value.root;
             if (!destContainer.children) destContainer.children = [];
-            insertIndex = destContainer.children.length;
+            insertIndex =
+                typeof targetIndex === 'number' && !isNaN(targetIndex)
+                    ? Math.max(
+                          0,
+                          Math.min(targetIndex, destContainer.children.length),
+                      )
+                    : destContainer.children.length;
             targetDepth = 1;
         } else {
             const search = findNode(targetId);
@@ -213,7 +220,16 @@ export function useDocumentState(initialDoc?: DocumentSchema) {
                 }
                 destContainer = search.node;
                 if (!destContainer.children) destContainer.children = [];
-                insertIndex = destContainer.children.length;
+                insertIndex =
+                    typeof targetIndex === 'number' && !isNaN(targetIndex)
+                        ? Math.max(
+                              0,
+                              Math.min(
+                                  targetIndex,
+                                  destContainer.children.length,
+                              ),
+                          )
+                        : destContainer.children.length;
                 targetDepth = search.depth;
             } else {
                 // 'before' or 'after'
@@ -303,9 +319,14 @@ export function useDocumentState(initialDoc?: DocumentSchema) {
             return { success: false, error };
         }
 
+        const shouldClearSelection =
+            selectedNodeId.value === nodeId ||
+            (selectedNodeId.value !== null &&
+                isDescendant(selectedNodeId.value, nodeId));
+
         search.parent.children.splice(search.index, 1);
 
-        if (selectedNodeId.value === nodeId) {
+        if (shouldClearSelection) {
             selectedNodeId.value = null;
         }
 

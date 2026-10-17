@@ -2,7 +2,7 @@
  * Client-Side Safe HTML Sanitizer
  * Uses W3C DOMParser instead of fragile regexes.
  * Strips script tags, unsafe elements, event handlers (onclick/onerror),
- * and disallowed URL schemes (javascript:, data:).
+ * disallowed URL schemes (javascript:, data:), and DOM-clobbering id attributes.
  */
 
 const ALLOWED_TAGS = new Set([
@@ -46,8 +46,21 @@ export function isSafeUrl(url: string | null | undefined): boolean {
         return true;
     }
 
+    // Check for invisible or control characters (CVE prevention)
+    for (let i = 0; i < trimmed.length; i++) {
+        const code = trimmed.charCodeAt(i);
+        if ((code >= 0 && code <= 31) || code === 127) {
+            return false;
+        }
+    }
+
+    // Reject protocol-relative URLs (e.g. //evil.com)
+    if (trimmed.startsWith('//')) {
+        return false;
+    }
+
     // Relative URLs and hash anchors are safe
-    if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+    if (trimmed.startsWith('/')) {
         return true;
     }
     if (trimmed.startsWith('#')) {
@@ -63,34 +76,48 @@ export function isSafeUrl(url: string | null | undefined): boolean {
     }
 }
 
-export function sanitizeHtml(rawHtml: string): string {
+export interface DOMParserLike {
+    parseFromString(str: string, type: string): { body: Node };
+}
+
+export function sanitizeHtml(
+    rawHtml: string,
+    customParser?: DOMParserLike,
+): string {
     if (!rawHtml || typeof rawHtml !== 'string') {
         return '';
     }
 
-    if (typeof window === 'undefined' || typeof DOMParser === 'undefined') {
-        // Simple fallback when DOMParser is unavailable (e.g. basic node test environment without jsdom)
-        return rawHtml
-            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-            .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
-            .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
-            .replace(/on\w+="[^"]*"/gi, '')
-            .replace(/on\w+='[^']*'/gi, '')
-            .replace(/href\s*=\s*["']javascript:[^"']*["']/gi, 'href="#"');
+    let parser: DOMParserLike | null = customParser ?? null;
+
+    if (!parser) {
+        if (typeof DOMParser !== 'undefined') {
+            parser = new DOMParser();
+        } else if (typeof window !== 'undefined' && window.DOMParser) {
+            parser = new window.DOMParser();
+        }
     }
 
-    const parser = new DOMParser();
+    // If non-browser environment lacks trusted DOMParser, fail safely rather than using regex
+    if (!parser) {
+        return '';
+    }
+
     const doc = parser.parseFromString(rawHtml, 'text/html');
+    if (!doc || !doc.body) {
+        return '';
+    }
 
     function cleanNode(node: Node): void {
         const children = Array.from(node.childNodes);
 
         for (const child of children) {
-            if (child.nodeType === Node.ELEMENT_NODE) {
+            // Node.ELEMENT_NODE === 1
+            if (child.nodeType === 1) {
                 const element = child as HTMLElement;
                 const tagName = element.tagName.toLowerCase();
 
-                // If tag is not in whitelist, remove or unwrap it
+                // If tag is not in allowlist, remove it completely
                 if (!ALLOWED_TAGS.has(tagName)) {
                     element.remove();
                     continue;
@@ -119,25 +146,23 @@ export function sanitizeHtml(rawHtml: string): string {
                     } else if (
                         attrName !== 'class' &&
                         attrName !== 'target' &&
-                        attrName !== 'rel' &&
-                        attrName !== 'id'
+                        attrName !== 'rel'
                     ) {
                         // Strip arbitrary dangerous or unknown attributes
+                        // Note: 'id' is intentionally stripped to prevent DOM clobbering (F-02)
                         element.removeAttribute(attr.name);
                     }
                 }
 
                 // Recursively clean children
                 cleanNode(element);
-            } else if (
-                child.nodeType !== Node.TEXT_NODE &&
-                child.nodeType !== Node.COMMENT_NODE
-            ) {
+            } else if (child.nodeType !== 3 && child.nodeType !== 8) {
+                // Node.TEXT_NODE === 3, Node.COMMENT_NODE === 8
                 child.remove();
             }
         }
     }
 
     cleanNode(doc.body);
-    return doc.body.innerHTML;
+    return (doc.body as HTMLElement).innerHTML || '';
 }

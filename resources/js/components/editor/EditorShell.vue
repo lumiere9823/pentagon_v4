@@ -168,7 +168,13 @@ const handleDropComponent = (payload: {
     if (!props.can.edit) return;
 
     const docBefore = JSON.parse(JSON.stringify(document.value));
-    const res = insertNode(payload.type, payload.parentId, 'inside');
+    const res = insertNode(
+        payload.type,
+        payload.parentId,
+        'inside',
+        undefined,
+        payload.index,
+    );
 
     if (res.success) {
         pushSnapshot(docBefore);
@@ -195,7 +201,7 @@ const handleMoveDown = (nodeId: string) => {
 };
 
 const handleDuplicate = (nodeId: string) => {
-    if (!props.can.edit) return;
+    if (!props.can.edit || nodeId === document.value.root.id) return;
     const docBefore = JSON.parse(JSON.stringify(document.value));
     const res = duplicateNode(nodeId);
     if (res.success) {
@@ -204,7 +210,7 @@ const handleDuplicate = (nodeId: string) => {
 };
 
 const handleDelete = (nodeId: string) => {
-    if (!props.can.edit) return;
+    if (!props.can.edit || nodeId === document.value.root.id) return;
     const docBefore = JSON.parse(JSON.stringify(document.value));
     const res = deleteNode(nodeId);
     if (res.success) {
@@ -354,6 +360,7 @@ const handleUpdateProp = (payload: { key: string; value: unknown }) => {
                     :selected-node="selectedNode"
                     :component-metadata="selectedNodeMetadata"
                     :read-only="!can.edit"
+                    :is-root="selectedNode?.id === document.root.id"
                     @update-prop="handleUpdateProp"
                     @delete-node="handleDelete"
                     @duplicate-node="handleDuplicate"
