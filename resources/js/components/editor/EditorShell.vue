@@ -63,6 +63,8 @@ const {
     setHoveredNode,
     insertNode,
     updateNodeProps,
+    updateNodeStyle,
+    resetNodeStyle,
     deleteNode,
     duplicateNode,
     moveNodeRelative,
@@ -228,6 +230,34 @@ const handleUpdateProp = (payload: { key: string; value: unknown }) => {
         [payload.key]: payload.value,
     });
 };
+
+const handleUpdateStyle = (payload: {
+    viewport: 'tablet' | 'mobile';
+    key: string;
+    value: unknown;
+}) => {
+    if (!props.can.edit || !selectedNodeId.value) return;
+
+    recordDebouncedEdit(document.value);
+
+    updateNodeStyle(
+        selectedNodeId.value,
+        payload.viewport,
+        payload.key,
+        payload.value,
+    );
+};
+
+const handleResetStyle = (payload: {
+    viewport: 'tablet' | 'mobile';
+    key: string;
+}) => {
+    if (!props.can.edit || !selectedNodeId.value) return;
+
+    recordDebouncedEdit(document.value);
+
+    resetNodeStyle(selectedNodeId.value, payload.viewport, payload.key);
+};
 </script>
 
 <template>
@@ -361,7 +391,10 @@ const handleUpdateProp = (payload: { key: string; value: unknown }) => {
                     :component-metadata="selectedNodeMetadata"
                     :read-only="!can.edit"
                     :is-root="selectedNode?.id === document.root.id"
+                    :current-viewport="viewport"
                     @update-prop="handleUpdateProp"
+                    @update-style="handleUpdateStyle"
+                    @reset-style="handleResetStyle"
                     @delete-node="handleDelete"
                     @duplicate-node="handleDuplicate"
                     @close="toggleRightPanel"

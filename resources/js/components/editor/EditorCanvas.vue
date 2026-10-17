@@ -127,6 +127,7 @@ const handleCanvasBackgroundClick = (e: MouseEvent) => {
                         :selected-id="selectedId"
                         :hovered-id="hoveredId"
                         :read-only="readOnly"
+                        :viewport="viewport"
                         @select="emit('select', $event)"
                         @hover="emit('hover', $event)"
                         @move-up="emit('moveUp', $event)"

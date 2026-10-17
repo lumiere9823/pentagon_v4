@@ -210,4 +210,50 @@ describe('useDocumentState', () => {
         // Selection MUST be cleared because selected node was inside the deleted subtree
         expect(selectedNodeId.value).toBeNull();
     });
+
+    it('updates and resets responsive styles with pruning', () => {
+        const { document, insertNode, updateNodeStyle, resetNodeStyle, findNode } = useDocumentState();
+        const containerId = document.value.root.children![0].id;
+
+        insertNode('Heading', containerId, 'inside', { text: 'Title', align: 'left' });
+        const headingNode = document.value.root.children![0].children![0];
+
+        // 1. Update style on tablet
+        updateNodeStyle(headingNode.id, 'tablet', 'align', 'center');
+        expect(headingNode.styles?.tablet?.align).toBe('center');
+        expect(headingNode.props.align).toBe('left'); // Base props untouched
+
+        // 2. Update style on mobile
+        updateNodeStyle(headingNode.id, 'mobile', 'align', 'right');
+        expect(headingNode.styles?.mobile?.align).toBe('right');
+
+        // 3. Reset mobile override
+        resetNodeStyle(headingNode.id, 'mobile', 'align');
+        expect(headingNode.styles?.mobile).toBeUndefined(); // Pruned mobile dictionary
+        expect(headingNode.styles?.tablet?.align).toBe('center');
+
+        // 4. Reset tablet override
+        resetNodeStyle(headingNode.id, 'tablet', 'align');
+        expect(headingNode.styles).toBeUndefined(); // Entire styles object pruned
+    });
+
+    it('preserves styles when duplicating a node subtree', () => {
+        const { document, insertNode, updateNodeStyle, duplicateNode } = useDocumentState();
+        const containerId = document.value.root.children![0].id;
+
+        insertNode('Button', containerId, 'inside', { label: 'Click me' });
+        const buttonNode = document.value.root.children![0].children![0];
+        updateNodeStyle(buttonNode.id, 'mobile', 'size', 'lg');
+
+        const dupRes = duplicateNode(buttonNode.id);
+        expect(dupRes.success).toBe(true);
+
+        const container = document.value.root.children![0];
+        expect(container.children!.length).toBe(2);
+
+        const clonedButton = container.children![1];
+        expect(clonedButton.id).not.toBe(buttonNode.id);
+        expect(clonedButton.styles?.mobile?.size).toBe('lg');
+    });
 });
+

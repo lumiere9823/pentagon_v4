@@ -15,10 +15,12 @@ import ImageRenderer from './renderers/ImageRenderer.vue';
 import RichTextRenderer from './renderers/RichTextRenderer.vue';
 import SectionRenderer from './renderers/SectionRenderer.vue';
 import SpacerRenderer from './renderers/SpacerRenderer.vue';
+import { resolveAllResponsiveProps } from '@/lib/responsive';
 import {
     CONTAINER_COMPONENT_TYPES,
     type CoreComponentType,
     type DocumentNode,
+    type ViewportMode,
 } from '@/types/document';
 
 const props = withDefaults(
@@ -31,6 +33,7 @@ const props = withDefaults(
         hoveredId?: string | null;
         readOnly?: boolean;
         depth?: number;
+        viewport?: ViewportMode;
     }>(),
     {
         parent: null,
@@ -40,6 +43,7 @@ const props = withDefaults(
         hoveredId: null,
         readOnly: false,
         depth: 1,
+        viewport: 'desktop',
     },
 );
 
@@ -93,6 +97,19 @@ const rendererMap: Record<CoreComponentType, any> = {
 
 const concreteRenderer = computed(() => rendererMap[props.node.type] || null);
 
+const effectiveProps = computed(() => {
+    return resolveAllResponsiveProps(props.node, props.viewport);
+});
+
+const isHiddenOnActiveViewport = computed(() => {
+    return effectiveProps.value.display === 'hidden';
+});
+
+const componentProps = computed(() => {
+    const { display: _, ...rest } = effectiveProps.value;
+    return rest;
+});
+
 const handleNodeClick = (e: MouseEvent) => {
     e.stopPropagation();
     emit('select', props.node.id);
@@ -116,16 +133,29 @@ const handleMouseLeave = (e: MouseEvent) => {
         :class="[
             'relative transition-all duration-150',
             isSelected
-                ? 'ring-2 ring-primary ring-offset-2 ring-offset-background'
+                ? isHiddenOnActiveViewport
+                    ? 'ring-dashed opacity-75 ring-2 ring-amber-500'
+                    : 'ring-2 ring-primary ring-offset-2 ring-offset-background'
                 : isHovered
                   ? 'ring-1 ring-primary/40'
                   : '',
+            isHiddenOnActiveViewport && !isSelected
+                ? 'border border-dashed border-muted-foreground/40 opacity-40'
+                : '',
             !readOnly ? 'cursor-pointer' : '',
         ]"
         @click="handleNodeClick"
         @mouseenter="handleMouseEnter"
         @mouseleave="handleMouseLeave"
     >
+        <!-- Hidden on Viewport Badge -->
+        <div
+            v-if="isHiddenOnActiveViewport"
+            class="pointer-events-none absolute top-1 right-1 z-20 flex items-center gap-1 rounded bg-amber-500/90 px-1.5 py-0.5 text-[9px] font-medium tracking-wide text-white uppercase shadow-xs"
+        >
+            Hidden on {{ viewport }}
+        </div>
+
         <!-- Floating Action Overlay Toolbar for Selected Node -->
         <NodeToolbar
             v-if="isSelected && !readOnly"
@@ -152,7 +182,7 @@ const handleMouseLeave = (e: MouseEvent) => {
         <component
             :is="concreteRenderer"
             v-else-if="concreteRenderer"
-            v-bind="node.props"
+            v-bind="componentProps"
         >
             <!-- Children Slot for Container Components -->
             <template v-if="isContainer">
@@ -191,6 +221,7 @@ const handleMouseLeave = (e: MouseEvent) => {
                         :hovered-id="hoveredId"
                         :read-only="readOnly"
                         :depth="depth + 1"
+                        :viewport="viewport"
                         @select="emit('select', $event)"
                         @hover="emit('hover', $event)"
                         @move-up="emit('moveUp', $event)"

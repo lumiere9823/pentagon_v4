@@ -144,6 +144,9 @@ export function useDocumentState(initialDoc?: DocumentSchema) {
             id: createNodeId(node.type),
             type: node.type,
             props: JSON.parse(JSON.stringify(node.props)),
+            styles: node.styles
+                ? JSON.parse(JSON.stringify(node.styles))
+                : undefined,
             children: node.children
                 ? node.children.map(cloneNodeWithNewIds)
                 : undefined,
@@ -300,6 +303,62 @@ export function useDocumentState(initialDoc?: DocumentSchema) {
             ...search.node.props,
             ...JSON.parse(JSON.stringify(newProps)),
         };
+
+        return { success: true };
+    }
+
+    function updateNodeStyle(
+        nodeId: string,
+        viewport: 'tablet' | 'mobile',
+        propKey: string,
+        value: unknown,
+    ): TreeMutationResult {
+        lastError.value = null;
+        const search = findNode(nodeId);
+        if (!search) {
+            const error = `Node '${nodeId}' not found.`;
+            lastError.value = error;
+            return { success: false, error };
+        }
+
+        if (!search.node.styles) {
+            search.node.styles = {};
+        }
+        if (!search.node.styles[viewport]) {
+            search.node.styles[viewport] = {};
+        }
+
+        search.node.styles[viewport][propKey] = JSON.parse(
+            JSON.stringify(value),
+        );
+
+        return { success: true };
+    }
+
+    function resetNodeStyle(
+        nodeId: string,
+        viewport: 'tablet' | 'mobile',
+        propKey: string,
+    ): TreeMutationResult {
+        lastError.value = null;
+        const search = findNode(nodeId);
+        if (!search) {
+            const error = `Node '${nodeId}' not found.`;
+            lastError.value = error;
+            return { success: false, error };
+        }
+
+        if (search.node.styles && search.node.styles[viewport]) {
+            delete search.node.styles[viewport][propKey];
+
+            if (Object.keys(search.node.styles[viewport]).length === 0) {
+                delete search.node.styles[viewport];
+            }
+
+            if (Object.keys(search.node.styles).length === 0) {
+                delete search.node.styles;
+            }
+        }
 
         return { success: true };
     }
@@ -503,6 +562,8 @@ export function useDocumentState(initialDoc?: DocumentSchema) {
         setHoveredNode,
         insertNode,
         updateNodeProps,
+        updateNodeStyle,
+        resetNodeStyle,
         deleteNode,
         duplicateNode,
         moveNodeRelative,

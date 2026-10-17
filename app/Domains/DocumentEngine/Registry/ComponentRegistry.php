@@ -20,9 +20,40 @@ class ComponentRegistry
         'Card Grid' => 'CardGrid',
     ];
 
+    /**
+     * Authoritative map of responsive overridable presentation properties per component type.
+     * Note: 'display' ('visible' | 'hidden') is permitted across all components.
+     *
+     * @var array<string, list<string>>
+     */
+    public const RESPONSIVE_OVERRIDABLE_PROPS = [
+        'Section' => ['padding', 'background'],
+        'Container' => ['maxWidth', 'centered'],
+        'Heading' => ['align'],
+        'RichText' => [],
+        'Image' => ['aspectRatio'],
+        'Button' => ['size', 'variant'],
+        'Hero' => ['align'],
+        'Columns' => ['count', 'gap'],
+        'CardGrid' => ['columns', 'gap'],
+        'FAQ' => [],
+        'Spacer' => ['size'],
+        'Divider' => ['style', 'color'],
+    ];
+
     public function __construct()
     {
         $this->registerCoreComponents();
+    }
+
+    public function isResponsiveOverrideAllowed(string $type, string $prop): bool
+    {
+        $normalized = $this->normalizeType($type);
+        if ($prop === 'display') {
+            return true;
+        }
+
+        return in_array($prop, self::RESPONSIVE_OVERRIDABLE_PROPS[$normalized] ?? [], true);
     }
 
     public function has(string $type): bool

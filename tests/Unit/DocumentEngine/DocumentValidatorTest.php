@@ -392,4 +392,246 @@ class DocumentValidatorTest extends TestCase
         $this->assertStringNotContainsString('onclick', $sanitizedContent);
         $this->assertStringNotContainsString('javascript:', $sanitizedContent);
     }
+
+    public function test_preserves_valid_responsive_styles_in_sanitized_document(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec_01',
+                'type' => 'Section',
+                'props' => ['padding' => 'medium', 'background' => 'transparent'],
+                'children' => [
+                    [
+                        'id' => 'head_01',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Responsive Title', 'level' => 2, 'align' => 'left'],
+                        'styles' => [
+                            'tablet' => ['align' => 'center'],
+                            'mobile' => ['align' => 'center', 'display' => 'hidden'],
+                        ],
+                        'children' => [],
+                    ],
+                ],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+
+        $this->assertTrue($result->isValid());
+        $sanitizedNode = $result->getSanitizedDocument()['root']['children'][0];
+        $this->assertArrayHasKey('styles', $sanitizedNode);
+        $this->assertEquals(['align' => 'center'], $sanitizedNode['styles']['tablet']);
+        $this->assertEquals(['align' => 'center', 'display' => 'hidden'], $sanitizedNode['styles']['mobile']);
+    }
+
+    public function test_omits_styles_when_absent_in_legacy_document(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec_01',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+
+        $this->assertTrue($result->isValid());
+        $this->assertArrayNotHasKey('styles', $result->getSanitizedDocument()['root']);
+    }
+
+    public function test_prunes_empty_styles_and_empty_viewports_cleanly(): void
+    {
+        // 1. Empty styles array/object
+        $docEmpty = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec_01',
+                'type' => 'Section',
+                'props' => [],
+                'styles' => [],
+                'children' => [],
+            ],
+        ];
+        $res1 = $this->validator->validate($docEmpty);
+        $this->assertTrue($res1->isValid());
+        $this->assertArrayNotHasKey('styles', $res1->getSanitizedDocument()['root']);
+
+        // 2. Viewport with empty dictionary
+        $docEmptyViewport = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec_01',
+                'type' => 'Section',
+                'props' => [],
+                'styles' => ['tablet' => []],
+                'children' => [],
+            ],
+        ];
+        $res2 = $this->validator->validate($docEmptyViewport);
+        $this->assertTrue($res2->isValid());
+        $this->assertArrayNotHasKey('styles', $res2->getSanitizedDocument()['root']);
+    }
+
+    public function test_rejects_invalid_styles_format(): void
+    {
+        // Primitive string
+        $docString = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec_01',
+                'type' => 'Section',
+                'props' => [],
+                'styles' => 'not-an-object',
+                'children' => [],
+            ],
+        ];
+        $res1 = $this->validator->validate($docString);
+        $this->assertFalse($res1->isValid());
+        $this->assertTrue($res1->hasError('root.styles'));
+        $this->assertEquals('invalid_styles_format', $res1->firstError()?->getCode());
+
+        // Non-empty list array
+        $docList = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec_01',
+                'type' => 'Section',
+                'props' => [],
+                'styles' => ['tablet', 'mobile'],
+                'children' => [],
+            ],
+        ];
+        $res2 = $this->validator->validate($docList);
+        $this->assertFalse($res2->isValid());
+        $this->assertEquals('invalid_styles_format', $res2->firstError()?->getCode());
+    }
+
+    public function test_rejects_disallowed_viewport_key(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec_01',
+                'type' => 'Section',
+                'props' => [],
+                'styles' => [
+                    'desktop' => ['padding' => 'large'],
+                ],
+                'children' => [],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+
+        $this->assertFalse($result->isValid());
+        $this->assertTrue($result->hasError('root.styles.desktop'));
+        $this->assertEquals('invalid_viewport_key', $result->firstError()?->getCode());
+    }
+
+    public function test_rejects_forbidden_content_and_structural_style_overrides(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec_01',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [
+                    [
+                        'id' => 'head_01',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Title', 'level' => 2],
+                        'styles' => [
+                            'mobile' => [
+                                'text' => 'Hacked text',
+                                'level' => 1,
+                            ],
+                        ],
+                        'children' => [],
+                    ],
+                ],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+
+        $this->assertFalse($result->isValid());
+        $this->assertTrue($result->hasError('root.children[0].styles.mobile.text'));
+        $this->assertEquals('disallowed_style_override', $result->firstError()?->getCode());
+    }
+
+    public function test_rejects_invalid_enum_and_type_in_responsive_styles(): void
+    {
+        // 1. Invalid enum in Heading.align
+        $doc1 = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec_01',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [
+                    [
+                        'id' => 'head_01',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Title', 'level' => 2],
+                        'styles' => [
+                            'tablet' => ['align' => 'diagonal'],
+                        ],
+                        'children' => [],
+                    ],
+                ],
+            ],
+        ];
+        $res1 = $this->validator->validate($doc1);
+        $this->assertFalse($res1->isValid());
+        $this->assertTrue($res1->hasError('root.children[0].styles.tablet.align'));
+        $this->assertEquals('invalid_enum_value', $res1->firstError()?->getCode());
+
+        // 2. Out of range / non-canonical count in Columns.count (1 is not in [2, 3, 4])
+        $doc2 = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec_01',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [
+                    [
+                        'id' => 'col_01',
+                        'type' => 'Columns',
+                        'props' => ['count' => 3],
+                        'styles' => [
+                            'mobile' => ['count' => 1],
+                        ],
+                        'children' => [],
+                    ],
+                ],
+            ],
+        ];
+        $res2 = $this->validator->validate($doc2);
+        $this->assertFalse($res2->isValid());
+        $this->assertTrue($res2->hasError('root.children[0].styles.mobile.count'));
+        $this->assertEquals('invalid_enum_value', $res2->firstError()?->getCode());
+
+        // 3. Invalid display value
+        $doc3 = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec_01',
+                'type' => 'Section',
+                'props' => [],
+                'styles' => [
+                    'tablet' => ['display' => 'inline-block'],
+                ],
+                'children' => [],
+            ],
+        ];
+        $res3 = $this->validator->validate($doc3);
+        $this->assertFalse($res3->isValid());
+        $this->assertTrue($res3->hasError('root.styles.tablet.display'));
+        $this->assertEquals('invalid_enum_value', $res3->firstError()?->getCode());
+    }
 }

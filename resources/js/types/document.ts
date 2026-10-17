@@ -16,10 +16,16 @@ export type CoreComponentType =
     | 'Spacer'
     | 'Divider';
 
+export interface ResponsiveStyleMap {
+    tablet?: Record<string, unknown>;
+    mobile?: Record<string, unknown>;
+}
+
 export interface DocumentNode<TProps = Record<string, unknown>> {
     id: string;
     type: CoreComponentType;
     props: TProps;
+    styles?: ResponsiveStyleMap;
     children?: DocumentNode[];
 }
 

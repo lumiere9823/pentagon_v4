@@ -5,6 +5,7 @@ namespace App\Domains\DocumentEngine\Validation;
 use App\Domains\DocumentEngine\DocumentLimits;
 use App\Domains\DocumentEngine\Registry\ComponentRegistry;
 use App\Domains\DocumentEngine\Sanitization\HtmlSanitizer;
+use App\Domains\DocumentEngine\Schema\ComponentDefinition;
 use JsonException;
 
 class DocumentValidator
@@ -339,11 +340,161 @@ class DocumentValidator
             }
         }
 
-        return [
+        $sanitizedStyles = $this->validateStyles(
+            rawStyles: $node['styles'] ?? null,
+            componentType: $normalizedType,
+            definition: $definition,
+            nodePath: $path,
+            errors: $errors
+        );
+
+        $nodeResult = [
             'id' => $nodeId,
             'type' => $normalizedType,
             'props' => $sanitizedProps,
             'children' => $sanitizedChildren,
         ];
+
+        if ($sanitizedStyles !== null && ! empty($sanitizedStyles)) {
+            $nodeResult['styles'] = $sanitizedStyles;
+        }
+
+        return $nodeResult;
+    }
+
+    /**
+     * @param  list<ValidationError>  $errors
+     * @return array<string, array<string, mixed>>|null
+     */
+    private function validateStyles(
+        mixed $rawStyles,
+        string $componentType,
+        ComponentDefinition $definition,
+        string $nodePath,
+        array &$errors,
+    ): ?array {
+        if ($rawStyles === null) {
+            return null;
+        }
+
+        if (! is_array($rawStyles)) {
+            $errors[] = new ValidationError(
+                path: "{$nodePath}.styles",
+                code: 'invalid_styles_format',
+                message: "Field 'styles' must be an associative object."
+            );
+
+            return null;
+        }
+
+        // Empty array from {} or [] prunes cleanly
+        if (empty($rawStyles)) {
+            return null;
+        }
+
+        if (array_is_list($rawStyles)) {
+            $errors[] = new ValidationError(
+                path: "{$nodePath}.styles",
+                code: 'invalid_styles_format',
+                message: "Field 'styles' must be an associative object with viewport keys."
+            );
+
+            return null;
+        }
+
+        $allowedViewports = ['tablet', 'mobile'];
+        $sanitizedStyles = [];
+
+        foreach ($rawStyles as $viewport => $viewportStyles) {
+            $viewportPath = "{$nodePath}.styles.{$viewport}";
+
+            if (! is_string($viewport) || ! in_array($viewport, $allowedViewports, true)) {
+                $errors[] = new ValidationError(
+                    path: $viewportPath,
+                    code: 'invalid_viewport_key',
+                    message: "Viewport '{$viewport}' is not allowed in styles. Only ['tablet', 'mobile'] are supported."
+                );
+
+                continue;
+            }
+
+            if (! is_array($viewportStyles)) {
+                $errors[] = new ValidationError(
+                    path: $viewportPath,
+                    code: 'invalid_styles_format',
+                    message: "Styles for viewport '{$viewport}' must be an associative object."
+                );
+
+                continue;
+            }
+
+            if (empty($viewportStyles)) {
+                // Empty viewport dictionary prunes cleanly
+                continue;
+            }
+
+            if (array_is_list($viewportStyles)) {
+                $errors[] = new ValidationError(
+                    path: $viewportPath,
+                    code: 'invalid_styles_format',
+                    message: "Styles for viewport '{$viewport}' must be an associative object."
+                );
+
+                continue;
+            }
+
+            $sanitizedViewport = [];
+
+            foreach ($viewportStyles as $propKey => $propVal) {
+                $propPath = "{$viewportPath}.{$propKey}";
+
+                if (! is_string($propKey)) {
+                    continue;
+                }
+
+                if (! $this->registry->isResponsiveOverrideAllowed($componentType, $propKey)) {
+                    $errors[] = new ValidationError(
+                        path: $propPath,
+                        code: 'disallowed_style_override',
+                        message: "Property '{$propKey}' cannot be overridden responsively for component '{$componentType}'."
+                    );
+
+                    continue;
+                }
+
+                if ($propKey === 'display') {
+                    if (! is_string($propVal) || ! in_array($propVal, ['visible', 'hidden'], true)) {
+                        $errors[] = new ValidationError(
+                            path: $propPath,
+                            code: 'invalid_enum_value',
+                            message: "Property 'display' must be one of ['visible', 'hidden']."
+                        );
+
+                        continue;
+                    }
+                    $sanitizedViewport['display'] = $propVal;
+
+                    continue;
+                }
+
+                $validatedVal = $definition->validateSingleProp(
+                    propName: $propKey,
+                    val: $propVal,
+                    propPath: $propPath,
+                    errors: $errors,
+                    sanitizer: $this->sanitizer
+                );
+
+                if ($validatedVal !== null || (isset($definition->propSchemas[$propKey]) && $propVal === null)) {
+                    $sanitizedViewport[$propKey] = $validatedVal;
+                }
+            }
+
+            if (! empty($sanitizedViewport)) {
+                $sanitizedStyles[$viewport] = $sanitizedViewport;
+            }
+        }
+
+        return ! empty($sanitizedStyles) ? $sanitizedStyles : null;
     }
 }

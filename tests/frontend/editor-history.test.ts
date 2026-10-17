@@ -101,4 +101,36 @@ describe('useEditorHistory', () => {
 
         expect(history.past.value.length).toBeLessThanOrEqual(5);
     });
+
+    it('atomically restores responsive styles during undo and redo', () => {
+        const { document, insertNode, updateNodeStyle, setDocument } = useDocumentState();
+
+        const history = useEditorHistory(
+            () => document.value,
+            (restored) => setDocument(restored),
+            { maxSnapshots: 30, debounceMs: 50 },
+        );
+
+        const containerId = document.value.root.children![0].id;
+        insertNode('Heading', containerId, 'inside', { text: 'Title', align: 'left' });
+        const headingNode = document.value.root.children![0].children![0];
+
+        // Snapshot before responsive style change
+        const snapBefore = JSON.parse(JSON.stringify(document.value));
+        updateNodeStyle(headingNode.id, 'mobile', 'align', 'center');
+        history.pushSnapshot(snapBefore);
+
+        expect(headingNode.styles?.mobile?.align).toBe('center');
+
+        // Undo -> restores no styles
+        history.undo();
+        const restoredNode = document.value.root.children![0].children![0];
+        expect(restoredNode.styles).toBeUndefined();
+
+        // Redo -> restores mobile style override
+        history.redo();
+        const redoNode = document.value.root.children![0].children![0];
+        expect(redoNode.styles?.mobile?.align).toBe('center');
+    });
 });
+

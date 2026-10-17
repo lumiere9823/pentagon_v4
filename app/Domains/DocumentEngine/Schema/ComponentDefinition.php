@@ -26,6 +26,145 @@ class ComponentDefinition
     ) {}
 
     /**
+     * Validate and sanitize a single property value against its schema definition.
+     *
+     * @param  list<ValidationError>  $errors
+     */
+    public function validateSingleProp(
+        string $propName,
+        mixed $val,
+        string $propPath,
+        array &$errors,
+        HtmlSanitizer $sanitizer,
+    ): mixed {
+        if (! isset($this->propSchemas[$propName])) {
+            $errors[] = new ValidationError(
+                path: $propPath,
+                code: 'unknown_prop',
+                message: "Unknown property '{$propName}' for component '{$this->type}'."
+            );
+
+            return null;
+        }
+
+        $schema = $this->propSchemas[$propName];
+        $type = $schema['type'] ?? 'string';
+
+        switch ($type) {
+            case 'string':
+                if (! is_string($val)) {
+                    $errors[] = new ValidationError(
+                        path: $propPath,
+                        code: 'invalid_type',
+                        message: "Property '{$propName}' must be a string."
+                    );
+
+                    return null;
+                }
+
+                $max = $schema['maxLength'] ?? DocumentLimits::MAX_SHORT_STRING_LENGTH;
+                if (mb_strlen($val) > $max) {
+                    $errors[] = new ValidationError(
+                        path: $propPath,
+                        code: 'max_length_exceeded',
+                        message: "Property '{$propName}' exceeds maximum length of {$max} characters."
+                    );
+
+                    return null;
+                }
+
+                if (isset($schema['enum']) && ! in_array($val, $schema['enum'], true)) {
+                    $allowed = implode(', ', $schema['enum']);
+                    $errors[] = new ValidationError(
+                        path: $propPath,
+                        code: 'invalid_enum_value',
+                        message: "Property '{$propName}' has invalid value '{$val}'. Allowed: [{$allowed}]."
+                    );
+
+                    return null;
+                }
+
+                if (! empty($schema['isUrl'])) {
+                    if (! $sanitizer->isSafeUrl($val)) {
+                        $errors[] = new ValidationError(
+                            path: $propPath,
+                            code: 'unsafe_url',
+                            message: "Property '{$propName}' contains an unsafe or forbidden URL scheme."
+                        );
+
+                        return null;
+                    }
+                }
+
+                if (! empty($schema['isHtml'])) {
+                    return $sanitizer->sanitize($val);
+                }
+
+                return $val;
+
+            case 'integer':
+                if (! is_int($val)) {
+                    $errors[] = new ValidationError(
+                        path: $propPath,
+                        code: 'invalid_type',
+                        message: "Property '{$propName}' must be an integer."
+                    );
+
+                    return null;
+                }
+
+                if (isset($schema['min']) && $val < $schema['min']) {
+                    $errors[] = new ValidationError(
+                        path: $propPath,
+                        code: 'min_value_exceeded',
+                        message: "Property '{$propName}' must be at least {$schema['min']}."
+                    );
+
+                    return null;
+                }
+
+                if (isset($schema['max']) && $val > $schema['max']) {
+                    $errors[] = new ValidationError(
+                        path: $propPath,
+                        code: 'max_value_exceeded',
+                        message: "Property '{$propName}' must be at most {$schema['max']}."
+                    );
+
+                    return null;
+                }
+
+                if (isset($schema['enum']) && ! in_array($val, $schema['enum'], true)) {
+                    $allowed = implode(', ', $schema['enum']);
+                    $errors[] = new ValidationError(
+                        path: $propPath,
+                        code: 'invalid_enum_value',
+                        message: "Property '{$propName}' has invalid value '{$val}'. Allowed: [{$allowed}]."
+                    );
+
+                    return null;
+                }
+
+                return $val;
+
+            case 'boolean':
+                if (! is_bool($val)) {
+                    $errors[] = new ValidationError(
+                        path: $propPath,
+                        code: 'invalid_type',
+                        message: "Property '{$propName}' must be a boolean."
+                    );
+
+                    return null;
+                }
+
+                return $val;
+
+            default:
+                return $val;
+        }
+    }
+
+    /**
      * Validate and sanitize props against the schema definition.
      *
      * @param  array<string, mixed>  $rawProps

@@ -39,60 +39,187 @@ Before introducing new Phase 06 capabilities, the following defects discovered d
 
 ---
 
-## 3. Workstream A: Responsive Styling Architecture
+## 3. Workstream A: Responsive Styling Architecture (Sprint 1 Gate A Specification)
 
-### 3.1 Business & UX Requirements
-- An editor can switch between Desktop (1280px), Tablet (768px), and Mobile (375px) viewports using the existing Viewport Switcher.
-- When a viewport is selected, style controls in the Inspector (e.g. padding, text alignment, column counts, visibility) display and edit the values specific to that viewport.
-- Values inherit down the cascade: **Desktop (Base) → Tablet → Mobile** (Mobile inherits from Tablet, Tablet inherits from Desktop).
-- Modifying a property in Tablet mode overrides Desktop for Tablet and Mobile, while Desktop remains untouched.
-- Structural properties (such as text content, URLs, image sources, and children arrays) remain universal across viewports and cannot be overridden.
+### 3.1 Verified Source Findings & Schema v1 Compatibility Analysis
+Before writing code, an exhaustive audit of all code paths that serialize, validate, clone, mutate, or render `DocumentNode` was conducted:
 
-### 3.2 Data Contract & Schema v1 Compatibility
-To prevent breaking changes, database migrations, or schema version bumps from v1 to v2, responsive overrides will utilize a standardized optional `styles` dictionary on the node:
+1. **`app/Domains/DocumentEngine/Validation/DocumentValidator.php`:**
+   - In `validateNode()`, the validator does not reject extra keys on the `$node` array, but lines 342-348 return an explicit array containing only `['id', 'type', 'props', 'children']`.
+   - *Impact:* Passing `styles` currently results in silent stripping upon sanitization.
+   - *Mitigation:* Implement `validateStyles()` to validate and preserve `styles` in the sanitized return array when provided, while omitting it entirely when absent.
+2. **`resources/js/composables/useDocumentState.ts`:**
+   - In `cloneNodeWithNewIds()`, the cloning function constructs `{ id, type, props, children }`.
+   - *Impact:* Duplicating a node would strip its `styles` dictionary.
+   - *Mitigation:* Update `cloneNodeWithNewIds()` to deeply clone `styles: node.styles ? JSON.parse(JSON.stringify(node.styles)) : undefined`.
+3. **`resources/js/composables/useEditorHistory.ts`:**
+   - Uses `structuredClone(document.value)` for bounded undo/redo snapshots.
+   - *Impact:* Perfectly preserves `styles` across undo and redo operations without loss.
+4. **Existing Fixtures & Schema v1 Compatibility:**
+   - Fixtures (`minimal_valid.json`, `all_twelve_components.json`) do not include `styles`.
+   - Setting `styles` as an optional property (`styles?: { tablet?: Record<string, unknown>; mobile?: Record<string, unknown> }`) guarantees 100% backward compatibility for all existing documents. `schemaVersion` remains `1` without requiring schema migrations or version bumps.
 
-```json
-{
-  "id": "node_heading_x7y8z9",
-  "type": "Heading",
-  "props": {
-    "text": "Responsive Headline",
-    "level": 2,
-    "align": "left"
-  },
-  "styles": {
-    "tablet": {
-      "align": "center"
-    },
-    "mobile": {
-      "align": "center"
-    }
-  }
+---
+
+### 3.2 Final Node Data Contract
+
+```typescript
+export interface ResponsiveStyleMap {
+    tablet?: Record<string, unknown>;
+    mobile?: Record<string, unknown>;
+}
+
+export interface DocumentNode<TProps = Record<string, unknown>> {
+    id: string;
+    type: CoreComponentType;
+    props: TProps;
+    styles?: ResponsiveStyleMap;
+    children?: DocumentNode[];
 }
 ```
 
-#### Allowed Overridable Properties per Component
-Only styling and presentation properties are overridable:
-- `Section`: `padding`, `background`
-- `Container`: `maxWidth`
-- `Heading`: `align`
-- `Button`: `size`, `variant`
-- `Columns`: `count`, `gap`
-- `CardGrid`: `columns`, `gap`
-- `Spacer`: `size`
-- `Divider`: `style`, `color`
-- Universal: `display: 'visible' | 'hidden'` (allows hiding specific blocks on mobile/desktop)
+- **Top-Level Viewport Keys:** Strictly `'tablet'` and `'mobile'`. Desktop is the canonical cascade root and its values reside directly in `node.props`. Any key other than `'tablet'` or `'mobile'` inside `styles` is rejected by the backend validator with `invalid_viewport_key`.
+- **Empty Viewport Dictionaries:** Pruned automatically upon saving or resetting. If both viewports are empty, `styles` is omitted or set to `undefined`.
 
-#### Forbidden Overrides (Structural Invariants)
-- `props.text`, `props.content`, `props.src`, `props.url`, `props.ctaUrl`, `props.items`, `children`.
-- If an unauthorized property is submitted in `styles`, `DocumentValidator.php` rejects the payload with `disallowed_style_override`.
+---
 
-### 3.3 Style Merging Algorithm
+### 3.3 Authoritative 12-Component Responsive Property Allowlist
+
+Every permitted property in `styles` is strictly presentational. All structural properties (content, text, URLs, children, IDs) are strictly forbidden in `styles`.
+
+| Component Type | Permitted `styles` Properties | Data Type & Allowed Values | Presentation vs Structure | In Base `props`? |
+| :--- | :--- | :--- | :--- | :--- |
+| **`Section`** | `padding`<br>`background`<br>`display` | `string` (`none`, `small`, `medium`, `large`)<br>`string` (`transparent`, `muted`, `primary`, `dark`)<br>`string` (`visible`, `hidden`) | Presentation<br>Presentation<br>Presentation | Yes<br>Yes<br>Optional (default: `visible`) |
+| **`Container`** | `maxWidth`<br>`centered`<br>`display` | `string` (`sm`, `md`, `lg`, `xl`, `full`)<br>`boolean`<br>`string` (`visible`, `hidden`) | Presentation<br>Presentation<br>Presentation | Yes<br>Yes<br>Optional (default: `visible`) |
+| **`Heading`** | `align`<br>`display` | `string` (`left`, `center`, `right`)<br>`string` (`visible`, `hidden`) | Presentation<br>Presentation | Yes<br>Optional (default: `visible`) |
+| **`RichText`** | `display` | `string` (`visible`, `hidden`) | Presentation | Optional (default: `visible`) |
+| **`Image`** | `aspectRatio`<br>`display` | `string` (`auto`, `16:9`, `4:3`, `1:1`)<br>`string` (`visible`, `hidden`) | Presentation<br>Presentation | Yes<br>Optional (default: `visible`) |
+| **`Button`** | `size`<br>`variant`<br>`display` | `string` (`sm`, `md`, `lg`)<br>`string` (`primary`, `secondary`, `outline`, `ghost`)<br>`string` (`visible`, `hidden`) | Presentation<br>Presentation<br>Presentation | Yes<br>Yes<br>Optional (default: `visible`) |
+| **`Hero`** | `align`<br>`display` | `string` (`left`, `center`)<br>`string` (`visible`, `hidden`) | Presentation<br>Presentation | Yes<br>Optional (default: `visible`) |
+| **`Columns`** | `count`<br>`gap`<br>`display` | `integer` (`2`, `3`, `4`)<br>`string` (`small`, `medium`, `large`)<br>`string` (`visible`, `hidden`) | Presentation<br>Presentation<br>Presentation | Yes<br>Yes<br>Optional (default: `visible`) |
+| **`CardGrid`** | `columns`<br>`gap`<br>`display` | `integer` (`2`, `3`, `4`)<br>`string` (`small`, `medium`, `large`)<br>`string` (`visible`, `hidden`) | Presentation<br>Presentation<br>Presentation | Yes<br>Yes<br>Optional (default: `visible`) |
+| **`FAQ`** | `display` | `string` (`visible`, `hidden`) | Presentation | Optional (default: `visible`) |
+| **`Spacer`** | `size`<br>`display` | `string` (`small`, `medium`, `large`, `xlarge`)<br>`string` (`visible`, `hidden`) | Presentation<br>Presentation | Yes<br>Optional (default: `visible`) |
+| **`Divider`** | `style`<br>`color`<br>`display` | `string` (`solid`, `dashed`, `dotted`)<br>`string` (`muted`, `primary`, `subtle`)<br>`string` (`visible`, `hidden`) | Presentation<br>Presentation<br>Presentation | Yes<br>Yes<br>Optional (default: `visible`) |
+
+#### Strictly Forbidden Properties (Rejected with `disallowed_style_override`)
+- Node identity & hierarchy: `id`, `type`, `children`.
+- Content & text: `Heading.text`, `Heading.level` (semantic tag), `RichText.content`, `Button.label`, `Hero.title`, `Hero.subtitle`, `Hero.ctaText`, `FAQ.items`.
+- URLs & media sources: `Image.src`, `Image.alt`, `Image.caption`, `Button.url`, `Button.target`, `Hero.ctaUrl`.
+
+---
+
+### 3.4 Viewport & CSS Breakpoint Semantics
+
+#### 1. Viewport Width Ranges & Mapping
+| Viewport Mode | Editor Preset Width | Media Query Range in Published CSS | Description |
+| :--- | :--- | :--- | :--- |
+| **`mobile`** | `375px` | `width < 768px` (Tailwind base utility) | Smartphones / small handhelds |
+| **`tablet`** | `768px` | `768px <= width < 1024px` (Tailwind `md:`) | Tablets portrait / narrow laptops |
+| **`desktop`** | `1280px` (base) | `width >= 1024px` (Tailwind `lg:`) | Desktops / large screens |
+
+- **Non-Overlapping Boundary Guarantee:**
+  - Mobile: $[0\text{px}, 767\text{px}]$
+  - Tablet: $[768\text{px}, 1023\text{px}]$
+  - Desktop: $[1024\text{px}, +\infty)$
+- **Simulated Canvas vs. Physical Monitor:**
+  - Because `EditorCanvas.vue` renders inside a sized container `div` rather than an isolated `iframe`, physical browser media queries evaluate to the user's host monitor (e.g. 1920px), NOT the canvas width.
+  - Therefore, inside the editor canvas, renderers consume computed effective props via `resolveResponsiveProp(node, key, currentViewport)` based on the simulated viewport.
+
+#### 2. Canonical Component Display Modes & Layout Behavior
+Every component renderer has an intrinsic root display mode. Emitting generic `block` to restore visibility breaks grid, flex, and inline layouts. Therefore, an explicit canonical mapping is defined across all 12 core components:
+
+| Component Type | Root Element in Renderer | Default CSS Display Mode ($D_C$) | Layout & Parent Context |
+| :--- | :--- | :--- | :--- |
+| **`Section`** | `<section>` | `block` | Full-width container |
+| **`Container`** | `<div>` | `block` | Centered layout container |
+| **`Heading`** | `<h1>`..`<h6>` | `block` | Semantic typography block |
+| **`RichText`** | `<div class="prose">` | `block` | Prose content container |
+| **`Image`** | `<figure>` | `block` | Visual asset container |
+| **`Button`** | `<div class="inline-block">` | `inline-block` | Inline interactive trigger |
+| **`Hero`** | `<div class="flex flex-col">` | `flex` | Vertical flex layout with centering |
+| **`Columns`** | `<div class="grid">` | `grid` | Multi-column grid container |
+| **`CardGrid`** | `<div class="grid">` | `grid` | Multi-card grid container |
+| **`FAQ`** | `<div>` | `block` | Accordion list container |
+| **`Spacer`** | `<div class="flex">` | `flex` | Dimensional spacer |
+| **`Divider`** | `<div>` | `block` | Horizontal divider rule |
+
+#### 3. Equivalent Published CSS Strategy & Breakpoint Restoration
+When a component has responsive `display` overrides, the static compiler computes effective visibility at each breakpoint ($V_{\text{mobile}}, V_{\text{tablet}}, V_{\text{desktop}} \in \{\text{'visible'}, \text{'hidden'}\}$).
+
+To restore the component's **original layout mode** without breaking its structure:
+- If visible, its target display utility is its intrinsic mode $D_C \in \{\text{'block'}, \text{'inline-block'}, \text{'flex'}, \text{'grid'}\}$.
+- If hidden, its utility is `'hidden'`.
+
+The mobile-first compiler emits:
+- If $V_M == \text{'hidden'}$ and $V_T == \text{'visible'}$: Emits `hidden md:${D_C}`.
+- If $V_M == \text{'visible'}$, $V_T == \text{'hidden'}$, $V_D == \text{'visible'}$: Emits `${D_C} md:hidden lg:${D_C}`.
+- If $V_M == \text{'hidden'}$, $V_T == \text{'hidden'}$, $V_D == \text{'visible'}$: Emits `hidden lg:${D_C}`.
+
+#### 4. Tailwind CSS v4 Static Scanner Guarantee
+Tailwind CSS v4 scans source files for literal class tokens. Constructing classes dynamically at runtime (e.g. `md:` + $D_C$) risks classes being omitted from the production CSS build (`public/build/assets/app-*.css`).
+To guarantee that Tailwind's scanner includes every required breakpoint utility in the production build, an explicit static class lookup table is maintained in [`resources/js/lib/responsive.ts`](file:///D:/pentagon/resources/js/lib/responsive.ts):
+
 ```typescript
-/**
- * Resolves effective property value based on current viewport and inheritance cascade:
- * Desktop (Base props) -> Tablet -> Mobile
- */
+export const RESPONSIVE_DISPLAY_CLASSES = {
+    block: {
+        mobileHidden: 'hidden md:block',
+        tabletHidden: 'block md:hidden lg:block',
+        mobileAndTabletHidden: 'hidden lg:block',
+    },
+    'inline-block': {
+        mobileHidden: 'hidden md:inline-block',
+        tabletHidden: 'inline-block md:hidden lg:inline-block',
+        mobileAndTabletHidden: 'hidden lg:inline-block',
+    },
+    flex: {
+        mobileHidden: 'hidden md:flex',
+        tabletHidden: 'flex md:hidden lg:flex',
+        mobileAndTabletHidden: 'hidden lg:flex',
+    },
+    grid: {
+        mobileHidden: 'hidden md:grid',
+        tabletHidden: 'grid md:hidden lg:grid',
+        mobileAndTabletHidden: 'hidden lg:grid',
+    },
+} as const;
+```
+
+#### 5. Concrete Responsive Display Examples by Component Type
+1. **`Columns` (Intrinsic Mode: `grid`): Hidden on Mobile Only:**
+   - $V_M = \text{'hidden'}, V_T = \text{'visible'}, V_D = \text{'visible'}$.
+   - **Emits:** `hidden md:grid`.
+   - *Result:* Mobile: hidden. Tablet & Desktop: restored strictly as `grid` (columns intact, not broken into block).
+2. **`Button` (Intrinsic Mode: `inline-block`): Hidden on Mobile Only:**
+   - $V_M = \text{'hidden'}, V_T = \text{'visible'}, V_D = \text{'visible'}$.
+   - **Emits:** `hidden md:inline-block`.
+   - *Result:* Mobile: hidden. Tablet & Desktop: restored as `inline-block` (not stretched to full-width block).
+3. **`Hero` (Intrinsic Mode: `flex`): Hidden on Tablet Only:**
+   - $V_M = \text{'visible'}, V_T = \text{'hidden'}, V_D = \text{'visible'}$.
+   - **Emits:** `flex md:hidden lg:flex`.
+   - *Result:* Mobile: `flex`. Tablet: hidden. Desktop: restored as `flex`.
+4. **`Heading` (Intrinsic Mode: `block`): Hidden on Mobile & Tablet:**
+   - $V_M = \text{'hidden'}, V_T = \text{'hidden'}, V_D = \text{'visible'}$.
+   - **Emits:** `hidden lg:block`.
+   - *Result:* Mobile & Tablet: hidden. Desktop: `block`.
+5. **Child Node in `Columns` (Parent Grid Context):**
+   - When a child node inside a column is hidden (`hidden md:block`), CSS `display: none` removes it from CSS grid auto-placement. On Tablet/Desktop, `md:block` re-inserts it into the grid layout seamlessly.
+
+#### 6. Editor Canvas Behavior (`NodeRenderer.vue` - Gate B Work)
+- In the active editor canvas, elements with `display: hidden` must **not** disappear completely; doing so would make them unselectable.
+- When `resolveResponsiveProp(node, 'display', currentViewport) === 'hidden'`:
+  - If **selected**: Render with `opacity-60 ring-2 ring-dashed ring-amber-500` and a badge `"Hidden on <Viewport>"`, enabling the user to configure or click "Reset to inherited".
+  - If **unselected**: Render with `opacity-30 border border-dashed border-muted-foreground/40` so the hierarchy remains navigable.
+- Removing an override removes the `display` key from `node.styles[viewport]` and immediately restores the inherited state without writing redundant `"visible"` values.
+
+---
+
+### 3.5 Inheritance Cascade, Columns/CardGrid Constraints & Reset Semantics
+
+The property inheritance cascade is strictly top-down:
+$$\text{Desktop (Base Props)} \longrightarrow \text{Tablet Overrides} \longrightarrow \text{Mobile Overrides}$$
+
+```typescript
 export function resolveResponsiveProp<T>(
     node: DocumentNode,
     propKey: string,
@@ -119,13 +246,111 @@ export function resolveResponsiveProp<T>(
 }
 ```
 
-### 3.4 Inspector Panel Viewport Integration
-- The Inspector reads `currentViewport` from `useEditorState()`.
-- An indicator badge in the Inspector header highlights: `"Editing for Mobile (375px)"` or `"Editing Base (Desktop)"`.
-- When the user changes a style field while in `tablet` or `mobile` mode:
-  - The mutation updates `node.styles[viewport][key] = value`.
-  - A subtle reset icon appears next to the field: `"Reset to inherited (Desktop: left)"`.
-  - Clicking reset removes `node.styles[viewport][key]`.
+#### Columns & CardGrid Constraint Resolution
+- **Canonical Enum Retained:** Both base `props` and responsive `styles` strictly enforce `count/columns` $\in [2, 3, 4]$.
+- **Why `1` is Not Permitted in the Data Contract:**
+  1. `ColumnsRenderer.vue` and `CardGridRenderer.vue` already use responsive Tailwind classes (`grid-cols-1 md:grid-cols-2`) that automatically collapse multi-column layouts to 1 column on narrow mobile screens by default.
+  2. Keeping `[2, 3, 4]` preserves the exact canonical schema from `ComponentRegistry` without diverging constraints between base props and responsive styles.
+  3. Any value outside `[2, 3, 4]` (including `1`) is rejected by `DocumentValidator` with `invalid_enum_value`.
+
+#### Concrete Inheritance & Reset Examples
+
+1. **Example 1: Normal Inherited Property (No Overrides)**
+   - Node: `Heading` with `props: { text: "Title", align: "left" }`, `styles: undefined`.
+   - Desktop resolves to `'left'`.
+   - Tablet resolves to `'left'` (inherited from Desktop).
+   - Mobile resolves to `'left'` (inherited from Desktop).
+   - In Inspector on Mobile: Displays `'left'` with indicator `Inherited from Desktop`.
+
+2. **Example 2: Tablet Override Without Mobile Override**
+   - Node: `Heading` with `props: { align: "left" }`, `styles: { tablet: { align: "center" } }`.
+   - Desktop resolves to `'left'`.
+   - Tablet resolves to `'center'` (explicit override).
+   - Mobile resolves to `'center'` (inherited from Tablet).
+   - In Inspector on Mobile: Displays `'center'` with indicator `Inherited from Tablet`.
+   - Reset Action on Tablet: Deleting `styles.tablet.align` causes both Tablet and Mobile to immediately fall back to `'left'`.
+
+3. **Example 3: Mobile Override Overriding Tablet and Desktop**
+   - Node: `Columns` with `props: { count: 4 }`, `styles: { tablet: { count: 3 }, mobile: { count: 2 } }`.
+   - Desktop resolves to `4`.
+   - Tablet resolves to `3`.
+   - Mobile resolves to `2`.
+   - Reset Action on Mobile: Deleting `styles.mobile.count` causes Mobile to inherit `3` from Tablet.
+
+4. **Example 4: `display: hidden` at One Breakpoint**
+   - Node: `Image` with `props: { src: "hero.png" }`, `styles: { mobile: { display: "hidden" } }`.
+   - Desktop: `display` is `'visible'`.
+   - Tablet: `display` is `'visible'` (inherited).
+   - Mobile: `display` is `'hidden'`.
+   - Published CSS: Emits `hidden md:block`.
+
+---
+
+### 3.6 Backend Validation Requirements (`DocumentValidator::validateStyles`)
+
+```php
+private function validateStyles(
+    mixed $rawStyles,
+    string $normalizedType,
+    ComponentDefinition $definition,
+    string $nodePath,
+    array &$errors
+): ?array
+```
+
+#### Safe PHP JSON Decoding & Object/List Handling
+When JSON is decoded with `json_decode($json, true)`:
+- Both `styles: {}` and `styles: []` decode to an empty PHP array `[]`.
+- In PHP 8.1+, `array_is_list([])` returns `true`, which would falsely reject valid empty `{}` if checked blindly.
+- **Safe Validation Logic:**
+  1. `!is_array($rawStyles)`: Emit `invalid_styles_format` at `{$nodePath}.styles` (`"Field 'styles' must be an associative object."`).
+  2. `empty($rawStyles)`: Prune cleanly and return `null`. Omitted from sanitized node without error.
+  3. `count($rawStyles) > 0 && array_is_list($rawStyles)`: Emit `invalid_styles_format` (`"Field 'styles' must be an associative object with viewport keys."`).
+  4. For each viewport (`tablet`, `mobile`):
+     - If viewport is not `'tablet'` or `'mobile'`: Emit `invalid_viewport_key`.
+     - If viewport value is not an array or is a non-empty list: Emit `invalid_styles_format`.
+     - If viewport value is empty `[]`: Prune that viewport.
+     - For each override in `styles[$viewport]`:
+       - If property is not in `RESPONSIVE_OVERRIDABLE_PROPS[$normalizedType]` and not `'display'`: Emit `disallowed_style_override`.
+       - If property is `'display'`: Must be `'visible'` or `'hidden'`. If invalid, emit `invalid_enum_value`.
+       - If property is known: Validate against `$definition->propSchemas[$key]` (type, enum, min/max). Emits `invalid_type` or `invalid_enum_value`.
+  5. If after pruning, no viewport overrides remain: Return `null` and omit `styles` from the sanitized node.
+
+---
+
+### 3.7 Comprehensive Test Matrix
+
+| Area | Test Case | Target Suite | Status |
+| :--- | :--- | :--- | :--- |
+| **Backend** | Minimal valid document without `styles` passes without regression | `DocumentValidatorTest.php` | Existing |
+| **Backend** | Document with valid `styles` preserves `styles` after normalization | `DocumentValidatorTest.php` | To Add |
+| **Backend** | Rejects non-associative `styles` (e.g. list array `[]` or primitive) with `invalid_styles_format` | `DocumentValidatorTest.php` | To Add |
+| **Backend** | Rejects `desktop` viewport key in `styles` with `invalid_viewport_key` | `DocumentValidatorTest.php` | To Add |
+| **Backend** | Rejects forbidden content override (e.g. `Heading.text`, `Image.src`) with `disallowed_style_override` | `DocumentValidatorTest.php` | To Add |
+| **Backend** | Rejects invalid enum value in responsive style (e.g. `Heading.align: "diagonal"`) with `invalid_enum_value` | `DocumentValidatorTest.php` | To Add |
+| **Backend** | Rejects integer type mismatch in `Columns.count` (e.g. string `"2"`) with `invalid_type` | `DocumentValidatorTest.php` | To Add |
+| **Backend** | Rejects non-canonical `Columns.count = 1` or `CardGrid.columns = 1` with `invalid_enum_value` | `DocumentValidatorTest.php` | To Add |
+| **Backend** | Validates universal `display: "visible" \| "hidden"` override across components | `DocumentValidatorTest.php` | To Add |
+| **Backend** | Prunes empty `{}` or `[]` styles cleanly without throwing false `invalid_styles_format` | `DocumentValidatorTest.php` | To Add |
+| **Frontend** | `resolveResponsiveProp()` correctly implements Desktop -> Tablet -> Mobile cascade | `tests/frontend/responsive.test.ts` | To Add |
+| **Frontend** | Tests all 3 viewport ranges and boundary widths (375px, 768px, 1280px) | `tests/frontend/responsive.test.ts` | To Add |
+| **Frontend** | Restores intrinsic display mode (`grid` for Columns/CardGrid, `flex` for Hero/Spacer, `inline-block` for Button, `block` for Heading/Section) | `tests/frontend/responsive.test.ts` | To Add |
+| **Frontend** | Duplicating a node via `cloneNodeWithNewIds()` preserves `styles` | `tests/frontend/document-state.test.ts` | To Add |
+| **Frontend** | Inspector updates `node.styles[viewport]` without mutating Desktop base `props` | `tests/frontend/inspector-helpers.test.ts` | To Add |
+| **Frontend** | Resetting override deletes the viewport key and restores inherited value without persisting redundant `visible` | `tests/frontend/inspector-helpers.test.ts` | To Add |
+| **Frontend** | Undo/redo atomically restores previous responsive style states | `tests/frontend/editor-history.test.ts` | To Add |
+| **Frontend** | Viewer role displays responsive styles in read-only mode without allowing edits | `PageBuilderTest.php` | To Add |
+
+---
+
+### 3.8 Compatibility Risks & Status
+
+- **Risk 1: Double-Editing Confusion in Inspector:** Users might inadvertently edit Desktop base values when intending to edit Mobile only.
+  - *Mitigation:* Clear visual indicator in the Inspector header showing active viewport context (e.g., `"Editing for Mobile (375px)"` with color badge) and explicit "Reset to inherited" buttons on overridden fields.
+- **Risk 2: Disappearing Hidden Elements:** Setting `display: hidden` on Mobile could cause elements to become unselectable on the canvas.
+  - *Mitigation:* In editor canvas mode, `hidden` elements are rendered with reduced opacity (`opacity-60`) and a `"Hidden"` badge, ensuring they can always be selected and unhidden.
+
+**Gate A Status:** `GATE A READY FOR APPROVAL`
 
 ---
 

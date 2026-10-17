@@ -20,7 +20,7 @@
 | 03 — Document engine & registry | DONE | Schema v1, 12 Core Components, Recursive DocumentValidator, HtmlSanitizer (symfony/html-sanitizer), 91/91 Pest tests passed, Pint & TS pass, Vite build pass | None | Tech Lead |
 | 04 — Design system & editor shell | DONE | Editor Shell layout, Viewport Switcher (Desktop/Tablet/Mobile), Component Library via API registry, Canvas & Inspector placeholders, 98/98 Pest tests passed, Pint & TS pass, Vite build pass | None | Tech Lead |
 | 05 — Visual editing core | DONE | Client document state, 12 renderers, dynamic inspector, bounded undo-redo, native DnD. Phase 05 Audit complete; F-01 to F-06 remediated; 46 Vitest tests pass | None | Tech Lead |
-| 06 — Responsive, media & templates | NOT STARTED | Technical plan prepared (`PHASE_06_BA_TECHNICAL_PLAN.md`) | Awaiting approval | |
+| 06 — Responsive, media & templates | IN PROGRESS | Sprint 1 (Responsive Styling) complete: DocumentValidator, cascade resolver, state mutations, Inspector controls, Canvas simulation. 107 Pest tests pass, 61 Vitest tests pass, Pint pass, Vite build pass | None | Tech Lead |
 | 07 — Persistence & revisions | NOT STARTED | | | |
 | 08 — Preview & publishing | NOT STARTED | | | |
 | 09 — Dynamic content & SEO | NOT STARTED | | | |
@@ -68,6 +68,11 @@
 | P05-07 | Dynamic Schema-Driven Inspector Panel | DONE | `InspectorPanel.vue` rendering categorized controls (Content, Style, Settings) from component registry schema | Real-time prop two-way sync |
 | P05-08 | Automated Test Suites & Quality Gates | DONE | 13/13 Vitest frontend tests, 100/100 Pest tests, Pint pass, TypeScript pass, Vite production build pass | Full compliance across all quality gates |
 | P05-09 | Defect Remediation & Security Hardening | DONE | F-01 through F-07 resolved: integer prop coercion, domSanitizer hardening, dynamic root checks, drop index insertion, subtree selection cleanup, 46 frontend tests pass | Zero regressions |
+| P06-01 | Responsive Schema & Validator Contract | DONE | `DocumentValidator.php` supporting `tablet`/`mobile` styles, display hidden/visible, safe pruning, 7 new unit tests | Pest 107/107 passed |
+| P06-02 | Responsive Cascade Resolver & Static CSS Classes | DONE | `resources/js/lib/responsive.ts` cascade resolution, intrinsic component display modes, static Tailwind tokens | 12 Vitest tests passed |
+| P06-03 | Document State Mutations & History Isolation | DONE | `updateNodeStyle`, `resetNodeStyle`, deep clone `styles`, atomic undo/redo | Vitest tests passed |
+| P06-04 | Inspector Responsive Styling Controls | DONE | `InspectorPanel.vue` viewport banner, override badges, reset buttons, display visibility control | Vitest & Biome passed |
+| P06-05 | Canvas & Renderer Active Viewport Resolution | DONE | `NodeRenderer.vue` dynamic responsive props, dashed ring & badge for hidden components | Vitest & Vite build passed |
 
 ## Gate before moving to next phase
 - [x] All phase acceptance criteria passed.
