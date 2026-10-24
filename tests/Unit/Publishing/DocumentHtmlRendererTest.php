@@ -583,6 +583,22 @@ class DocumentHtmlRendererTest extends TestCase
         $this->assertStringContainsString('</html>', $fullDoc);
     }
 
+    public function test_render_document_inlines_compiled_stylesheet_instead_of_unhashed_link(): void
+    {
+        $json = file_get_contents(base_path('tests/Fixtures/Documents/minimal_valid.json'));
+
+        $fullDoc = $this->renderer->renderDocument($json);
+
+        $this->assertStringNotContainsString('/build/assets/app.css', $fullDoc);
+        $this->assertStringNotContainsString('<link rel="stylesheet"', $fullDoc);
+
+        if (! is_file(public_path('build/manifest.json'))) {
+            $this->markTestSkipped('Vite build output not present; inline CSS path not exercised.');
+        }
+
+        $this->assertMatchesRegularExpression('/<style>.+<\/style>\s*<\/head>/s', $fullDoc);
+    }
+
     public function test_responsive_display_classes_are_rendered_correctly(): void
     {
         $doc = $this->wrapInValidDocument([

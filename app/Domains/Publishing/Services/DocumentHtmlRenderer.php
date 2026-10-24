@@ -7,6 +7,7 @@ use App\Domains\DocumentEngine\Registry\ComponentRegistry;
 use App\Domains\DocumentEngine\Sanitization\HtmlSanitizer;
 use App\Domains\DocumentEngine\Validation\DocumentValidator;
 use App\Domains\Publishing\Exceptions\PublishRenderingException;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -41,6 +42,13 @@ class DocumentHtmlRenderer
         'Spacer' => 'flex',
         'Divider' => 'block',
     ];
+
+    /**
+     * Vite entry whose compiled CSS is inlined into rendered documents.
+     */
+    private const STYLESHEET_ENTRY = 'resources/css/app.css';
+
+    private static ?string $inlineStylesheetCache = null;
 
     public function __construct(
         ?DocumentValidator $validator = null,
@@ -107,7 +115,9 @@ class DocumentHtmlRenderer
         $title = $meta['title'] ?? ($pageSettings['title'] ?? 'Published Page');
         $description = $meta['description'] ?? ($pageSettings['description'] ?? '');
         $canonicalUrl = $meta['canonical_url'] ?? '';
-        $stylesheetUrl = $meta['stylesheet_url'] ?? '/build/assets/app.css';
+        $stylesheetBlock = isset($meta['stylesheet_url'])
+            ? '<link rel="stylesheet" href="'.$this->escape($meta['stylesheet_url']).'">'
+            : $this->inlineCompiledStylesheet();
 
         $escapedTitle = $this->escape($title);
         $escapedDescription = $this->escape($description);
@@ -131,13 +141,45 @@ class DocumentHtmlRenderer
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{$escapedTitle}</title>
     <meta name="description" content="{$escapedDescription}">{$metaBlock}
-    <link rel="stylesheet" href="{$this->escape($stylesheetUrl)}">
+    {$stylesheetBlock}
 </head>
 <body class="min-h-screen bg-white text-gray-900 antialiased">
     {$renderedFragment}
 </body>
 </html>
 HTML;
+    }
+
+    /**
+     * Inline the compiled Vite stylesheet so a sealed release stays self-contained.
+     *
+     * Vite emits content-hashed filenames that change on every build, and each deploy
+     * replaces public/build. Linking to the hashed file would break published releases
+     * after later deploys, so the CSS is embedded and covered by the manifest html_hash.
+     */
+    private function inlineCompiledStylesheet(): string
+    {
+        if (self::$inlineStylesheetCache !== null) {
+            return self::$inlineStylesheetCache;
+        }
+
+        $manifestPath = public_path('build/manifest.json');
+        $manifest = is_file($manifestPath) ? json_decode((string) file_get_contents($manifestPath), true) : null;
+        $cssFile = is_array($manifest) ? ($manifest[self::STYLESHEET_ENTRY]['file'] ?? null) : null;
+        $cssPath = is_string($cssFile) ? public_path('build/'.$cssFile) : null;
+
+        if ($cssPath === null || ! is_file($cssPath)) {
+            Log::warning('Compiled stylesheet not found; rendering page without styles. Run `npm run build`.', [
+                'manifest' => $manifestPath,
+            ]);
+
+            return '';
+        }
+
+        // Prevent the CSS from closing the <style> element early.
+        $css = str_ireplace('</style', '<\/style', (string) file_get_contents($cssPath));
+
+        return self::$inlineStylesheetCache = "<style>{$css}</style>";
     }
 
     /**
