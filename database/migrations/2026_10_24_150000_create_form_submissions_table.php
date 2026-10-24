@@ -1,0 +1,37 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('form_submissions', function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->foreignId('website_id')->constrained('websites')->cascadeOnDelete();
+            $table->foreignId('page_id')->nullable()->constrained('pages')->nullOnDelete();
+            $table->string('form_name', 64)->default('contact');
+            $table->jsonb('payload');
+            $table->string('ip_address', 45)->nullable();
+            $table->text('user_agent')->nullable();
+            $table->string('status', 32)->default('new');
+            $table->timestamps();
+
+            $table->index(['website_id', 'created_at']);
+            $table->index(['website_id', 'form_name', 'status']);
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('form_submissions');
+    }
+};

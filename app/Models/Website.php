@@ -78,6 +78,30 @@ class Website extends Model
     }
 
     /**
+     * @return HasMany<PageTemplate, $this>
+     */
+    public function templates(): HasMany
+    {
+        return $this->hasMany(PageTemplate::class);
+    }
+
+    /**
+     * @return HasMany<FormSubmission, $this>
+     */
+    public function formSubmissions(): HasMany
+    {
+        return $this->hasMany(FormSubmission::class);
+    }
+
+    /**
+     * @return HasMany<PageRedirect, $this>
+     */
+    public function redirects(): HasMany
+    {
+        return $this->hasMany(PageRedirect::class);
+    }
+
+    /**
      * Check if user is a member with optional specific roles.
      *
      * @param  list<WebsiteRole|string>  $roles
