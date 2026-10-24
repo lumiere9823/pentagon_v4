@@ -1,0 +1,11 @@
+[Unit]
+Description=Trigger Pentagon Page Builder Scheduled Tasks Every Minute
+After=network.target
+
+[Timer]
+OnCalendar=*:0/1
+Persistent=true
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

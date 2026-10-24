@@ -1,0 +1,15 @@
+[Unit]
+Description=Pentagon Page Builder Scheduled Tasks Runner
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/pentagon/current
+ExecStart=/usr/bin/php /var/www/pentagon/current/artisan schedule:run --verbose --no-interaction
+StandardOutput=append:/var/www/pentagon/shared/storage/logs/scheduler.log
+StandardError=append:/var/www/pentagon/shared/storage/logs/scheduler-error.log
+
+[Install]
+WantedBy=multi-user.target
