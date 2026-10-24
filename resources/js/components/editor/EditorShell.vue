@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { PanelLeftOpen, SlidersHorizontal } from '@lucide/vue';
 import ComponentLibrary from './ComponentLibrary.vue';
+import ConflictModal from './ConflictModal.vue';
 import EditorCanvas from './EditorCanvas.vue';
 import EditorToolbar from './EditorToolbar.vue';
 import InspectorPanel from './InspectorPanel.vue';
+import PublishSuccessModal from './PublishSuccessModal.vue';
+import RevisionsModal from './RevisionsModal.vue';
+import SeoSettingsModal from './SeoSettingsModal.vue';
+import SaveAsTemplateModal from '@/components/templates/SaveAsTemplateModal.vue';
+import { useAutosave } from '@/composables/useAutosave';
 import { useDocumentState } from '@/composables/useDocumentState';
 import { useEditorHistory } from '@/composables/useEditorHistory';
 import { useEditorState } from '@/composables/useEditorState';
@@ -15,6 +21,7 @@ import {
     type CoreComponentType,
     type DocumentSchema,
 } from '@/types/document';
+import type { PageSeoMetadata } from '@/types/seo';
 
 interface WebsiteSummary {
     id: number;
@@ -27,7 +34,10 @@ interface PageSummary {
     title: string;
     slug: string;
     status: 'draft' | 'published' | 'archived' | string;
+    lock_version?: number;
     updated_at?: string | null;
+    document_json?: DocumentSchema | null;
+    seo_metadata?: PageSeoMetadata;
 }
 
 const props = defineProps<{
@@ -50,6 +60,15 @@ const {
     toggleLeftSidebar,
     toggleRightPanel,
 } = useEditorState();
+
+const saveTemplateModalOpen = ref(false);
+const revisionsModalOpen = ref(false);
+const seoModalOpen = ref(false);
+const conflictModalOpen = ref(false);
+const publishModalOpen = ref(false);
+const isPublishing = ref(false);
+const publishedPublicUrl = ref('');
+const seoMetadata = ref<PageSeoMetadata>(props.page.seo_metadata ?? {});
 
 // Document state (tree, selection, mutations)
 const {
@@ -78,6 +97,133 @@ const { canUndo, canRedo, pushSnapshot, recordDebouncedEdit, undo, redo } =
         (restoredDoc) => setDocument(restoredDoc),
         { maxSnapshots: 30, debounceMs: 300 },
     );
+
+// Autosave & Persistence (M14)
+const {
+    lockVersion,
+    saveStatus,
+    isDirty,
+    isSaving,
+    lastSavedAt,
+    errorMessage: autosaveError,
+    conflictData,
+    notifyChange,
+    saveNow,
+    forceUpdateLockVersion,
+} = useAutosave({
+    websiteId: props.website.id,
+    pageId: props.page.id,
+    initialLockVersion: props.page.lock_version ?? 1,
+    getCurrentDocument: () => document.value,
+    getSeoMetadata: () => seoMetadata.value,
+    onConflict: () => {
+        conflictModalOpen.value = true;
+    },
+});
+
+let isInternalDocumentUpdate = false;
+let isInitialMount = true;
+
+watch(
+    () => document.value,
+    () => {
+        if (isInitialMount) {
+            isInitialMount = false;
+            return;
+        }
+        if (isInternalDocumentUpdate) {
+            isInternalDocumentUpdate = false;
+            return;
+        }
+        if (props.can.edit) {
+            notifyChange();
+        }
+    },
+    { deep: true },
+);
+
+const handleConflictReload = () => {
+    if (typeof window !== 'undefined') {
+        window.location.reload();
+    }
+};
+
+const handleConflictOverwrite = async () => {
+    if (conflictData.value) {
+        forceUpdateLockVersion(conflictData.value.current_lock_version);
+        conflictModalOpen.value = false;
+        await saveNow('Overwrite after conflict resolution', false);
+    }
+};
+
+const handleRevisionRestored = (payload: {
+    document_json: DocumentSchema;
+    lock_version: number;
+}) => {
+    isInternalDocumentUpdate = true;
+    setDocument(payload.document_json);
+    forceUpdateLockVersion(payload.lock_version);
+    saveStatus.value = 'saved';
+    revisionsModalOpen.value = false;
+};
+
+function getXsrfToken(): string {
+    if (
+        typeof window === 'undefined' ||
+        typeof window.document === 'undefined'
+    ) {
+        return '';
+    }
+    const match = window.document.cookie
+        .split('; ')
+        .find((row: string) => row.startsWith('XSRF-TOKEN='));
+    return match ? decodeURIComponent(match.split('=')[1] ?? '') : '';
+}
+
+const handlePreview = () => {
+    if (typeof window !== 'undefined') {
+        const url = `/websites/${props.website.id}/pages/${props.page.id}/preview`;
+        window.open(url, '_blank');
+    }
+};
+
+const handlePublish = async () => {
+    if (!props.can.edit || isPublishing.value) return;
+
+    try {
+        if (isDirty.value) {
+            await saveNow('Pre-publish autosave', false);
+        }
+
+        isPublishing.value = true;
+        const response = await fetch(
+            `/websites/${props.website.id}/pages/${props.page.id}/publish`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-XSRF-TOKEN': getXsrfToken(),
+                },
+            },
+        );
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            publishedPublicUrl.value = data.public_url;
+            publishModalOpen.value = true;
+            props.page.status = 'published';
+        } else {
+            lastError.value = data.message || 'Publishing failed.';
+        }
+    } catch (e: unknown) {
+        lastError.value =
+            e instanceof Error ? e.message : 'Network error during publish.';
+    } finally {
+        isPublishing.value = false;
+    }
+};
 
 // Component Registry metadata for Inspector
 const registryMetadata = ref<Record<string, ComponentMetadata>>({});
@@ -121,6 +267,11 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
         if (!isInputField) {
             e.preventDefault();
             toggleLeftSidebar();
+        }
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (props.can.edit) {
+            saveNow();
         }
     }
 }
@@ -275,23 +426,36 @@ const handleResetStyle = (payload: {
             :can-edit="can.edit"
             :can-undo="canUndo"
             :can-redo="canRedo"
+            :save-status="saveStatus"
+            :is-saving="isSaving"
+            :is-dirty="isDirty"
+            :is-publishing="isPublishing"
             @update:viewport="setViewport"
             @toggle-left-sidebar="toggleLeftSidebar"
             @toggle-right-panel="toggleRightPanel"
             @undo="undo"
             @redo="redo"
+            @save="saveNow"
+            @open-revisions="revisionsModalOpen = true"
+            @open-seo="seoModalOpen = true"
+            @save-as-template="saveTemplateModalOpen = true"
+            @preview="handlePreview"
+            @publish="handlePublish"
         />
 
-        <!-- Error Notification Toast/Banner if mutation rejects -->
+        <!-- Error Notification Toast/Banner if mutation or autosave rejects -->
         <div
-            v-if="lastError"
+            v-if="lastError || autosaveError"
             class="flex items-center justify-between border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs text-destructive"
         >
-            <span>{{ lastError }}</span>
+            <span>{{ lastError || autosaveError }}</span>
             <button
                 type="button"
                 class="ml-2 font-semibold underline"
-                @click="lastError = null"
+                @click="
+                    lastError = null;
+                    autosaveError = null;
+                "
             >
                 Dismiss
             </button>
@@ -402,5 +566,44 @@ const handleResetStyle = (payload: {
                 />
             </transition>
         </div>
+
+        <SaveAsTemplateModal
+            v-model:open="saveTemplateModalOpen"
+            :website-id="website.id"
+            :document="document"
+        />
+
+        <ConflictModal
+            :open="conflictModalOpen"
+            :server-lock-version="conflictData?.current_lock_version ?? 0"
+            :server-updated-at="conflictData?.updated_at"
+            @reload="handleConflictReload"
+            @overwrite="handleConflictOverwrite"
+        />
+
+        <RevisionsModal
+            v-model:open="revisionsModalOpen"
+            :website-id="website.id"
+            :page-id="page.id"
+            :can-edit="can.edit"
+            @restored="handleRevisionRestored"
+        />
+
+        <PublishSuccessModal
+            v-model:open="publishModalOpen"
+            :public-url="publishedPublicUrl"
+            :page-title="page.title"
+        />
+
+        <SeoSettingsModal
+            v-model:open="seoModalOpen"
+            v-model="seoMetadata"
+            :website-id="website.id"
+            :website-name="website.name"
+            :website-slug="website.slug"
+            :page-title="page.title"
+            :page-slug="page.slug"
+            @save="saveNow('Updated SEO metadata')"
+        />
     </div>
 </template>

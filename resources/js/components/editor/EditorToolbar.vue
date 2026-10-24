@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
 import {
+    AlertCircle,
+    AlertTriangle,
     ArrowLeft,
+    Bookmark,
     CheckCircle2,
     Clock,
     Eye,
+    Globe,
+    History,
     LayoutGrid,
+    Loader2,
     PanelLeftClose,
     PanelLeftOpen,
     PanelRightClose,
@@ -52,10 +58,18 @@ const props = withDefaults(
         canEdit: boolean;
         canUndo?: boolean;
         canRedo?: boolean;
+        saveStatus?: 'saved' | 'saving' | 'dirty' | 'error' | 'conflict';
+        isSaving?: boolean;
+        isDirty?: boolean;
+        isPublishing?: boolean;
     }>(),
     {
         canUndo: false,
         canRedo: false,
+        saveStatus: 'saved',
+        isSaving: false,
+        isDirty: false,
+        isPublishing: false,
     },
 );
 
@@ -65,6 +79,13 @@ const emit = defineEmits<{
     (e: 'toggleRightPanel'): void;
     (e: 'undo'): void;
     (e: 'redo'): void;
+    (e: 'saveAsTemplate'): void;
+    (e: 'save'): void;
+    (e: 'openRevisions'): void;
+    (e: 'openSeo'): void;
+    (e: 'publish'): void;
+    (e: 'preview'): void;
+    (e: 'sharePreview'): void;
 }>();
 
 const getStatusBadge = (status: string) => {
@@ -288,14 +309,14 @@ const getStatusBadge = (status: string) => {
 
                 <div class="h-4 w-px bg-border" />
 
-                <!-- Action Button Placeholders: Explicitly disabled per Phase 04/05 non-goals -->
+                <!-- Action Buttons: Preview & Publish enabled in Phase 08 -->
                 <Tooltip>
                     <TooltipTrigger as-child>
                         <Button
                             variant="ghost"
                             size="sm"
-                            disabled
-                            class="hidden h-8 gap-1 text-xs opacity-60 md:inline-flex"
+                            class="hidden h-8 gap-1 text-xs md:inline-flex"
+                            @click="emit('preview')"
                         >
                             <Eye class="h-3.5 w-3.5" />
                             <span>Preview</span>
@@ -303,26 +324,28 @@ const getStatusBadge = (status: string) => {
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
                         <p class="text-xs">
-                            Preview will be enabled in Phase 08
+                            Open full-page draft preview in a new tab
                         </p>
                     </TooltipContent>
                 </Tooltip>
 
-                <Tooltip>
+                <Tooltip v-if="canEdit">
                     <TooltipTrigger as-child>
                         <Button
                             variant="outline"
                             size="sm"
-                            disabled
-                            class="h-8 gap-1 text-xs opacity-60"
+                            class="h-8 gap-1 text-xs"
+                            @click="emit('saveAsTemplate')"
                         >
-                            <Save class="h-3.5 w-3.5" />
-                            <span class="hidden sm:inline">Save Draft</span>
+                            <Bookmark class="h-3.5 w-3.5" />
+                            <span class="hidden md:inline"
+                                >Save as Template</span
+                            >
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
                         <p class="text-xs">
-                            Autosave & Persistence will be enabled in Phase 07
+                            Save current canvas layout as a custom template
                         </p>
                     </TooltipContent>
                 </Tooltip>
@@ -330,18 +353,128 @@ const getStatusBadge = (status: string) => {
                 <Tooltip>
                     <TooltipTrigger as-child>
                         <Button
-                            variant="default"
+                            variant="ghost"
                             size="sm"
-                            disabled
-                            class="h-8 gap-1 text-xs opacity-60"
+                            class="h-8 gap-1 text-xs"
+                            @click="emit('openRevisions')"
                         >
-                            <UploadCloud class="h-3.5 w-3.5" />
-                            <span class="hidden sm:inline">Publish</span>
+                            <History class="h-3.5 w-3.5" />
+                            <span class="hidden md:inline">Revisions</span>
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
                         <p class="text-xs">
-                            Publishing pipeline will be enabled in Phase 08
+                            Browse and restore immutable revision snapshots
+                        </p>
+                    </TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                    <TooltipTrigger as-child>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            class="h-8 gap-1 text-xs"
+                            @click="emit('openSeo')"
+                        >
+                            <Globe class="h-3.5 w-3.5" />
+                            <span class="hidden md:inline">SEO</span>
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                        <p class="text-xs">
+                            Configure page metadata, OpenGraph cards, and search
+                            engine visibility
+                        </p>
+                    </TooltipContent>
+                </Tooltip>
+
+                <Tooltip v-if="canEdit">
+                    <TooltipTrigger as-child>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            :disabled="isSaving"
+                            class="h-8 gap-1.5 text-xs transition-colors"
+                            :class="{
+                                'border-destructive/40 text-destructive':
+                                    saveStatus === 'error' ||
+                                    saveStatus === 'conflict',
+                                'border-amber-500/40 text-amber-600 dark:text-amber-400':
+                                    saveStatus === 'dirty',
+                                'text-muted-foreground':
+                                    saveStatus === 'saved' && !isDirty,
+                            }"
+                            @click="emit('save')"
+                        >
+                            <Loader2
+                                v-if="isSaving"
+                                class="h-3.5 w-3.5 animate-spin"
+                            />
+                            <AlertTriangle
+                                v-else-if="saveStatus === 'conflict'"
+                                class="h-3.5 w-3.5"
+                            />
+                            <AlertCircle
+                                v-else-if="saveStatus === 'error'"
+                                class="h-3.5 w-3.5"
+                            />
+                            <CheckCircle2
+                                v-else-if="saveStatus === 'saved' && !isDirty"
+                                class="h-3.5 w-3.5 text-green-500"
+                            />
+                            <Save v-else class="h-3.5 w-3.5" />
+
+                            <span class="hidden sm:inline">
+                                {{
+                                    isSaving
+                                        ? 'Saving...'
+                                        : saveStatus === 'conflict'
+                                          ? 'Conflict'
+                                          : saveStatus === 'error'
+                                            ? 'Save Error'
+                                            : isDirty
+                                              ? 'Save Draft*'
+                                              : 'Saved'
+                                }}
+                            </span>
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                        <p class="text-xs">
+                            {{
+                                saveStatus === 'conflict'
+                                    ? 'Conflict detected — click to resolve'
+                                    : isDirty
+                                      ? 'Save Draft (Ctrl+S)'
+                                      : 'All changes saved'
+                            }}
+                        </p>
+                    </TooltipContent>
+                </Tooltip>
+
+                <Tooltip v-if="canEdit">
+                    <TooltipTrigger as-child>
+                        <Button
+                            variant="default"
+                            size="sm"
+                            :disabled="isPublishing || isSaving"
+                            class="h-8 gap-1.5 bg-primary text-xs text-primary-foreground transition-all hover:bg-primary/90"
+                            @click="emit('publish')"
+                        >
+                            <Loader2
+                                v-if="isPublishing"
+                                class="h-3.5 w-3.5 animate-spin"
+                            />
+                            <UploadCloud v-else class="h-3.5 w-3.5" />
+                            <span class="hidden sm:inline">
+                                {{ isPublishing ? 'Publishing...' : 'Publish' }}
+                            </span>
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                        <p class="text-xs">
+                            Compile and publish static release to public web
                         </p>
                     </TooltipContent>
                 </Tooltip>
