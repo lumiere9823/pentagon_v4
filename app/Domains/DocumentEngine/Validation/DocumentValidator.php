@@ -497,4 +497,39 @@ class DocumentValidator
 
         return ! empty($sanitizedStyles) ? $sanitizedStyles : null;
     }
+
+    /**
+     * Create a canonical empty Document Schema v1 document structure.
+     *
+     * @return array<string, mixed>
+     */
+    public static function createEmptyDocument(string $title = 'New Page'): array
+    {
+        return [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_section_default',
+                'type' => 'Section',
+                'props' => [
+                    'padding' => 'medium',
+                    'background' => 'transparent',
+                ],
+                'children' => [
+                    [
+                        'id' => 'node_container_default',
+                        'type' => 'Container',
+                        'props' => [
+                            'maxWidth' => 'lg',
+                            'centered' => true,
+                        ],
+                        'children' => [],
+                    ],
+                ],
+            ],
+            'pageSettings' => [
+                'title' => $title,
+                'description' => '',
+            ],
+        ];
+    }
 }

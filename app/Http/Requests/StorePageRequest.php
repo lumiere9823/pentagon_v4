@@ -34,6 +34,17 @@ class StorePageRequest extends FormRequest
                 'alpha_dash',
                 Rule::unique('pages', 'slug')->where('website_id', $website->id),
             ],
+            'template_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('page_templates', 'id')->where(function ($query) use ($website) {
+                    $query->where('is_active', true)
+                        ->where(function ($sub) use ($website) {
+                            $sub->where('website_id', $website->id)
+                                ->orWhereNull('website_id');
+                        });
+                }),
+            ],
         ];
     }
 
@@ -44,6 +55,7 @@ class StorePageRequest extends FormRequest
     {
         return [
             'slug.unique' => 'A page with this slug already exists on this website.',
+            'template_id.exists' => 'The selected template is unavailable or does not belong to this website.',
         ];
     }
 }
