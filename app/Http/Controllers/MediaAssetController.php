@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Domains\Media\Exceptions\MediaUsageScanException;
+use App\Domains\Media\Services\MediaConcurrencyLock;
 use App\Domains\Media\Services\MediaStorageService;
 use App\Domains\Media\Services\MediaUsageScanner;
+use App\Enums\MediaAssetStatus;
 use App\Http\Requests\StoreMediaRequest;
 use App\Http\Requests\UpdateMediaRequest;
 use App\Models\MediaAsset;
@@ -115,7 +117,8 @@ class MediaAssetController extends Controller
         Request $request,
         Website $website,
         MediaAsset $mediaAsset,
-        MediaUsageScanner $scanner
+        MediaUsageScanner $scanner,
+        MediaConcurrencyLock $lockService
     ): JsonResponse {
         // Enforce IDOR protection: Media asset must belong to the given website
         if ($mediaAsset->website_id !== $website->id) {
@@ -124,42 +127,61 @@ class MediaAssetController extends Controller
 
         $this->authorize('delete', $mediaAsset);
 
-        // Check if asset is referenced in any document sources
-        try {
-            $referencingPages = $scanner->findUsagesInWebsite($website, $mediaAsset);
-        } catch (MediaUsageScanException $e) {
-            Log::error("Media usage scan failed for asset {$mediaAsset->id}: {$e->getMessage()}");
+        return DB::transaction(function () use ($website, $mediaAsset, $scanner, $lockService) {
+            // 1. Acquire transaction-scoped advisory lock on the asset
+            $lockService->lockAsset($mediaAsset->id);
+
+            // 2. Re-read fresh record with row lock inside transaction
+            $locked = MediaAsset::where('id', $mediaAsset->id)
+                ->where('website_id', $website->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $locked) {
+                abort(404);
+            }
+
+            // If already pending deletion or purging, reject mutation
+            if ($locked->status !== MediaAssetStatus::ACTIVE) {
+                return response()->json([
+                    'message' => 'Media asset is already marked for deletion.',
+                    'error_code' => 'media_already_pending_deletion',
+                ], 422);
+            }
+
+            // 3. Authoritative usage scan under the advisory lock
+            try {
+                $referencingPages = $scanner->findUsagesInWebsite($website, $locked);
+            } catch (MediaUsageScanException $e) {
+                Log::error("Media usage scan failed for asset {$locked->id}: {$e->getMessage()}");
+
+                return response()->json([
+                    'message' => 'Unable to verify media asset usage due to a scan error. Deletion was blocked for safety.',
+                    'error_code' => 'media_scan_error',
+                ], 422);
+            }
+
+            if (! empty($referencingPages)) {
+                $hasIndeterminate = collect($referencingPages)->contains('reference_type', 'indeterminate');
+                $message = $hasIndeterminate
+                    ? 'Cannot delete media asset because it is referenced or suspected in '.count($referencingPages).' page(s) with unparseable content.'
+                    : 'Cannot delete media asset because it is currently used on '.count($referencingPages).' page(s).';
+
+                return response()->json([
+                    'message' => $message,
+                    'error_code' => 'media_in_use',
+                    'referencing_pages' => $referencingPages,
+                ], 422);
+            }
+
+            // 4. Transition status to pending_deletion and soft delete record
+            $locked->update(['status' => MediaAssetStatus::PENDING_DELETION]);
+            $locked->delete();
 
             return response()->json([
-                'message' => 'Unable to verify media asset usage due to a scan error. Deletion was blocked for safety.',
-                'error_code' => 'media_scan_error',
-            ], 422);
-        }
-
-        if (! empty($referencingPages)) {
-            $hasIndeterminate = collect($referencingPages)->contains('reference_type', 'indeterminate');
-            $message = $hasIndeterminate
-                ? 'Cannot delete media asset because it is referenced or suspected in '.count($referencingPages).' page(s) with unparseable content.'
-                : 'Cannot delete media asset because it is currently used on '.count($referencingPages).' page(s).';
-
-            return response()->json([
-                'message' => $message,
-                'error_code' => 'media_in_use',
-                'referencing_pages' => $referencingPages,
-            ], 422);
-        }
-
-        // Perform soft delete within a database transaction with row locking.
-        // Physical file unlinking is safely deferred to `media:prune-unreferenced`
-        // following a grace period to prevent TOCTOU race conditions with concurrent page saves.
-        DB::transaction(function () use ($mediaAsset) {
-            $locked = MediaAsset::where('id', $mediaAsset->id)->lockForUpdate()->first();
-            $locked?->delete();
+                'success' => true,
+            ]);
         });
-
-        return response()->json([
-            'success' => true,
-        ]);
     }
 
     /**
@@ -172,6 +194,7 @@ class MediaAssetController extends Controller
         return [
             'id' => $asset->id,
             'original_filename' => $asset->original_filename,
+            'status' => $asset->status->value,
             'url' => $asset->url,
             'mime_type' => $asset->mime_type,
             'size_bytes' => $asset->size_bytes,

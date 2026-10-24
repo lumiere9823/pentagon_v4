@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use App\Enums\MediaAssetStatus;
 use Database\Factories\MediaAssetFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -18,6 +20,7 @@ use Illuminate\Support\Facades\Storage;
  * @property string $storage_disk
  * @property string $storage_path
  * @property string $original_filename
+ * @property MediaAssetStatus $status
  * @property string $mime_type
  * @property int $size_bytes
  * @property int|null $width
@@ -35,6 +38,7 @@ use Illuminate\Support\Facades\Storage;
     'storage_disk',
     'storage_path',
     'original_filename',
+    'status',
     'mime_type',
     'size_bytes',
     'width',
@@ -56,11 +60,30 @@ class MediaAsset extends Model
     ];
 
     /**
+     * The "booted" method of the model.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (MediaAsset $asset) {
+            if ($asset->deleted_at !== null && $asset->status === MediaAssetStatus::ACTIVE) {
+                $asset->status = MediaAssetStatus::PENDING_DELETION;
+            }
+        });
+
+        static::deleting(function (MediaAsset $asset) {
+            if (! $asset->isForceDeleting()) {
+                $asset->status = MediaAssetStatus::PENDING_DELETION;
+            }
+        });
+    }
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array
     {
         return [
+            'status' => MediaAssetStatus::class,
             'size_bytes' => 'integer',
             'width' => 'integer',
             'height' => 'integer',
@@ -81,6 +104,39 @@ class MediaAsset extends Model
     public function uploader(): BelongsTo
     {
         return $this->belongsTo(User::class, 'uploaded_by');
+    }
+
+    /**
+     * Scope query to active media assets.
+     *
+     * @param  Builder<MediaAsset>  $query
+     * @return Builder<MediaAsset>
+     */
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->where('status', MediaAssetStatus::ACTIVE);
+    }
+
+    /**
+     * Scope query to pending deletion media assets.
+     *
+     * @param  Builder<MediaAsset>  $query
+     * @return Builder<MediaAsset>
+     */
+    public function scopePendingDeletion(Builder $query): Builder
+    {
+        return $query->where('status', MediaAssetStatus::PENDING_DELETION);
+    }
+
+    /**
+     * Scope query to purging media assets.
+     *
+     * @param  Builder<MediaAsset>  $query
+     * @return Builder<MediaAsset>
+     */
+    public function scopePurging(Builder $query): Builder
+    {
+        return $query->where('status', MediaAssetStatus::PURGING);
     }
 
     /**

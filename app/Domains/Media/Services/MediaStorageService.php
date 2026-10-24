@@ -2,6 +2,7 @@
 
 namespace App\Domains\Media\Services;
 
+use App\Enums\MediaAssetStatus;
 use App\Models\MediaAsset;
 use App\Models\User;
 use App\Models\Website;
@@ -152,6 +153,7 @@ class MediaStorageService
                 'storage_disk' => $disk,
                 'storage_path' => $normalizedPath,
                 'original_filename' => $safeOriginalName,
+                'status' => MediaAssetStatus::ACTIVE,
                 'mime_type' => $meta['mime_type'],
                 'size_bytes' => $meta['size_bytes'],
                 'width' => $meta['width'],

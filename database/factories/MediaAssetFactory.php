@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\MediaAssetStatus;
 use App\Models\MediaAsset;
 use App\Models\User;
 use App\Models\Website;
@@ -34,6 +35,7 @@ class MediaAssetFactory extends Factory
             'storage_disk' => 'public',
             'storage_path' => "media/1/{$uuid}.{$ext}",
             'original_filename' => fake()->word().".{$ext}",
+            'status' => MediaAssetStatus::ACTIVE,
             'mime_type' => $mimeMap[$ext],
             'size_bytes' => fake()->numberBetween(10240, 2097152),
             'width' => fake()->randomElement([640, 800, 1024, 1920]),
@@ -41,5 +43,21 @@ class MediaAssetFactory extends Factory
             'alt_text' => fake()->sentence(3),
             'uploaded_by' => User::factory(),
         ];
+    }
+
+    public function pendingDeletion(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'status' => MediaAssetStatus::PENDING_DELETION,
+            'deleted_at' => now(),
+        ]);
+    }
+
+    public function purging(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'status' => MediaAssetStatus::PURGING,
+            'deleted_at' => now(),
+        ]);
     }
 }
