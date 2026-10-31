@@ -27,6 +27,7 @@ class PageFactory extends Factory
             'website_id' => Website::factory(),
             'title' => $title,
             'slug' => Str::slug($title).'-'.fake()->unique()->randomNumber(3),
+            'is_homepage' => false,
             'document_json' => null,
             'status' => PageStatus::DRAFT,
             'lock_version' => 1,
@@ -72,6 +73,13 @@ class PageFactory extends Factory
                     'description' => '',
                 ],
             ],
+        ]);
+    }
+
+    public function homepage(): static
+    {
+        return $this->state(fn () => [
+            'is_homepage' => true,
         ]);
     }
 

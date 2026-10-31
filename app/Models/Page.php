@@ -19,6 +19,7 @@ use Illuminate\Support\Carbon;
  * @property int $website_id
  * @property string $title
  * @property string $slug
+ * @property bool $is_homepage
  * @property array<string, mixed>|null $document_json
  * @property array<string, mixed>|null $seo_metadata
  * @property PageStatus $status
@@ -37,6 +38,7 @@ use Illuminate\Support\Carbon;
     'website_id',
     'title',
     'slug',
+    'is_homepage',
     'document_json',
     'seo_metadata',
     'status',
@@ -54,6 +56,7 @@ class Page extends Model
     {
         return [
             'status' => PageStatus::class,
+            'is_homepage' => 'boolean',
             'document_json' => 'array',
             'seo_metadata' => 'array',
             'lock_version' => 'integer',
