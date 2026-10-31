@@ -42,6 +42,9 @@ export default defineConfig({
             ],
         },
     },
+    test: {
+        exclude: ['tests/e2e/**'],
+    },
     lint: {
         ignorePatterns: [
             'vendor/**',
