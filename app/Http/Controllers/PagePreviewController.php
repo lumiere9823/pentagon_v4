@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Domains\DocumentEngine\DocumentLimits;
 use App\Domains\Publishing\Services\DocumentHtmlRenderer;
 use App\Models\Page;
 use App\Models\PageRevision;
@@ -88,7 +89,7 @@ class PagePreviewController extends Controller
         if (empty($doc)) {
             // Fallback minimal valid document if empty
             return [
-                'schemaVersion' => 1,
+                'schemaVersion' => DocumentLimits::CURRENT_SCHEMA_VERSION,
                 'root' => [
                     'id' => 'root',
                     'type' => 'Container',

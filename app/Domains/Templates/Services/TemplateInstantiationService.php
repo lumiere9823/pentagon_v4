@@ -2,6 +2,7 @@
 
 namespace App\Domains\Templates\Services;
 
+use App\Domains\DocumentEngine\DocumentLimits;
 use App\Domains\DocumentEngine\Validation\DocumentValidator;
 use App\Models\PageTemplate;
 use InvalidArgumentException;
@@ -38,7 +39,7 @@ class TemplateInstantiationService
         $clonedRoot = $this->cloneNodeWithFreshIds($document['root'], $seenIds);
 
         $instantiatedDoc = [
-            'schemaVersion' => 1,
+            'schemaVersion' => DocumentLimits::CURRENT_SCHEMA_VERSION,
             'root' => $clonedRoot,
             'pageSettings' => [
                 'title' => $pageTitle,

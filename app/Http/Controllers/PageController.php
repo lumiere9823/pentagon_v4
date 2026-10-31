@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Domains\DocumentEngine\DocumentLimits;
 use App\Domains\DocumentEngine\Validation\DocumentValidator;
 use App\Domains\SEO\Services\RedirectManager;
 use App\Domains\Templates\Services\TemplateInstantiationService;
@@ -71,7 +72,7 @@ class PageController extends Controller
                 PageRevision::create([
                     'page_id' => $page->id,
                     'revision_number' => 1,
-                    'schema_version' => 1,
+                    'schema_version' => DocumentLimits::CURRENT_SCHEMA_VERSION,
                     'document_json' => $initialDocument,
                     'document_hash' => PageRevision::canonicalizeDocument($initialDocument),
                     'change_summary' => 'Initialized from template: '.$template->name,

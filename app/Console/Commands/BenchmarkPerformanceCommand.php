@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Domains\DocumentEngine\DocumentLimits;
 use App\Domains\DocumentEngine\Validation\DocumentValidator;
 use App\Domains\Publishing\Services\DocumentHtmlRenderer;
 use App\Domains\SEO\Services\PageSeoManager;
@@ -164,7 +165,7 @@ class BenchmarkPerformanceCommand extends Command
         }
 
         return [
-            'schemaVersion' => 1,
+            'schemaVersion' => DocumentLimits::CURRENT_SCHEMA_VERSION,
             'root' => [
                 'id' => 'root_container',
                 'type' => 'Container',

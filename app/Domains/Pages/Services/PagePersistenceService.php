@@ -2,6 +2,7 @@
 
 namespace App\Domains\Pages\Services;
 
+use App\Domains\DocumentEngine\DocumentLimits;
 use App\Domains\DocumentEngine\Validation\DocumentValidator;
 use App\Domains\Media\Services\MediaConcurrencyLock;
 use App\Domains\Media\Services\MediaUsageScanner;
@@ -366,7 +367,7 @@ class PagePersistenceService
             $newRevision = PageRevision::create([
                 'page_id' => $lockedPage->id,
                 'revision_number' => $nextRevisionNumber,
-                'schema_version' => 1,
+                'schema_version' => DocumentLimits::CURRENT_SCHEMA_VERSION,
                 'document_json' => $canonicalDocument,
                 'document_hash' => PageRevision::canonicalizeDocument($canonicalDocument),
                 'change_summary' => "Restored from Revision #{$targetRevision->revision_number}",
@@ -418,7 +419,7 @@ class PagePersistenceService
             return PageRevision::create([
                 'page_id' => $page->id,
                 'revision_number' => 1,
-                'schema_version' => 1,
+                'schema_version' => DocumentLimits::CURRENT_SCHEMA_VERSION,
                 'document_json' => $document,
                 'document_hash' => $newHash,
                 'change_summary' => $changeSummary ?? ($isAutosave ? 'Initial autosave' : 'Initial version'),
@@ -433,7 +434,7 @@ class PagePersistenceService
             return PageRevision::create([
                 'page_id' => $page->id,
                 'revision_number' => $latestRevision->revision_number + 1,
-                'schema_version' => 1,
+                'schema_version' => DocumentLimits::CURRENT_SCHEMA_VERSION,
                 'document_json' => $document,
                 'document_hash' => $newHash,
                 'change_summary' => $changeSummary ?? 'Manual save',
@@ -450,7 +451,7 @@ class PagePersistenceService
             return PageRevision::create([
                 'page_id' => $page->id,
                 'revision_number' => $latestRevision->revision_number + 1,
-                'schema_version' => 1,
+                'schema_version' => DocumentLimits::CURRENT_SCHEMA_VERSION,
                 'document_json' => $document,
                 'document_hash' => $newHash,
                 'change_summary' => $changeSummary ?? 'Autosave checkpoint',

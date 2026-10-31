@@ -41,7 +41,7 @@ class ReleaseStagingService
                 'page_revision_id' => $revision->id,
                 'release_number' => $nextNumber,
                 'status' => PageReleaseStatus::PENDING,
-                'schema_version' => 1,
+                'schema_version' => $revision->schema_version,
                 'renderer_version' => self::RENDERER_VERSION,
                 'created_by' => $creator?->id,
             ]);
@@ -149,7 +149,7 @@ class ReleaseStagingService
                 'page_id' => (int) $page->id,
                 'page_revision_id' => (int) $revision->id,
                 'release_number' => (int) $release->release_number,
-                'schema_version' => 1,
+                'schema_version' => $revision->schema_version,
                 'renderer_version' => self::RENDERER_VERSION,
                 'document_hash' => $docHash,
                 'html_bytes' => $fileBytes,

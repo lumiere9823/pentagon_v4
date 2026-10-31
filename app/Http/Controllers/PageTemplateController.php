@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Domains\DocumentEngine\DocumentLimits;
 use App\Domains\DocumentEngine\Validation\DocumentValidator;
 use App\Domains\Media\Services\MediaConcurrencyLock;
 use App\Domains\Media\Services\MediaUsageScanner;
@@ -162,7 +163,7 @@ class PageTemplateController extends Controller
                 'slug' => $slug,
                 'description' => $validated['description'] ?? null,
                 'category' => $validated['category'] ?? 'general',
-                'schema_version' => 1,
+                'schema_version' => DocumentLimits::CURRENT_SCHEMA_VERSION,
                 'document_json' => $canonicalDocument,
                 'thumbnail_path' => $validated['thumbnail_path'] ?? null,
                 'is_active' => true,

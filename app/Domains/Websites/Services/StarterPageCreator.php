@@ -2,6 +2,7 @@
 
 namespace App\Domains\Websites\Services;
 
+use App\Domains\DocumentEngine\DocumentLimits;
 use App\Enums\PageStatus;
 use App\Models\Page;
 use App\Models\PageRevision;
@@ -39,7 +40,7 @@ class StarterPageCreator
         PageRevision::create([
             'page_id' => $page->id,
             'revision_number' => 1,
-            'schema_version' => 1,
+            'schema_version' => DocumentLimits::CURRENT_SCHEMA_VERSION,
             'document_json' => $definition['document'],
             'document_hash' => PageRevision::canonicalizeDocument($definition['document']),
             'change_summary' => $definition['summary'],

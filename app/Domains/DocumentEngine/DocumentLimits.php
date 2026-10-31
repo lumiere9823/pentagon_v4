@@ -53,7 +53,13 @@ final class DocumentLimits
     public const string NODE_ID_REGEX = '/^[a-zA-Z0-9_-]{3,64}$/';
 
     /**
-     * Currently supported schema versions.
+     * Canonical schema emitted by persistence and publishing.
      */
-    public const array SUPPORTED_SCHEMA_VERSIONS = [1];
+    public const int CURRENT_SCHEMA_VERSION = 1;
+
+    /**
+     * Versions accepted as migration inputs. Keep an older version here only
+     * while DocumentSchemaMigrator has a complete path to CURRENT_SCHEMA_VERSION.
+     */
+    public const array SUPPORTED_SCHEMA_VERSIONS = [self::CURRENT_SCHEMA_VERSION];
 }
