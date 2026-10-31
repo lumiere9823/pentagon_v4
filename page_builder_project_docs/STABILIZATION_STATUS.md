@@ -2,11 +2,11 @@
 
 Ngày cập nhật: 2026-10-31
 
-Nhánh tích hợp local: `operations/phase-c`
+Nhánh tích hợp và remote: `main`
 
-Mốc đã kiểm chứng: `b493ab4`
+Mốc hosted CI đã kiểm chứng: `837df40`
 
-Remote: chưa cấu hình
+Remote: `origin` → `https://github.com/lumiere9823/pentagon_v4.git`
 
 ## 1. Trạng thái tổng quát
 
@@ -14,7 +14,7 @@ Pentagon hiện đã vượt qua giai đoạn prototype. Các module chính—do
 builder, media, revision/release, publishing, SEO, templates, submissions admin,
 homepage và vận hành backup/restore—đều đã có implementation cùng automated
 coverage. Hệ thống đang ở trạng thái **feature-complete cho luồng page cơ bản và
-release-ready ở local**, nhưng chưa được coi là production-ready vì hosted CI,
+release-ready và **hosted CI đã PASS**, nhưng chưa được coi là production-ready vì
 staging deployment, screen-reader acceptance và production cutover chưa diễn ra.
 
 Homepage/Starter Set đã được fast-forward vào nhánh tích hợp. Mỗi website mới có
@@ -34,6 +34,7 @@ SEO, UI, concurrency và browser lifecycle đều đã được kiểm chứng l
 | Phase B | Playwright, responsive 375/768/1280, axe, publish/unpublish lifecycle | PASS local | `ffdd70d` |
 | Phase C | Deploy/rollback guard, backup/restore rehearsal, production health check | PASS local | `74f0f85` |
 | D-048 | Homepage `/` và Starter Page Set Home/About/Contact | PASS local, đã merge vào integration | `355fbea`…`b493ab4` |
+| Phase D | Remote integration và hosted CI | CI + browser PASS; branch governance còn mở | `837df40`, run `41181365205` |
 
 ## 3. Verification tại mốc `b493ab4`
 
@@ -54,7 +55,8 @@ SEO, UI, concurrency và browser lifecycle đều đã được kiểm chứng l
 - `git diff --check`: PASS.
 - Working tree sau merge: sạch.
 
-Các con số trên là bằng chứng local. Chưa có hosted CI/staging/production evidence.
+Các con số trên là baseline local tại `b493ab4`. Hosted workflow `41181365205`
+đã PASS cả job `ci` và `browser` trên `837df40`; staging/production vẫn chưa có evidence.
 
 ## 4. Khoảng trống còn mở
 
@@ -85,7 +87,7 @@ Các con số trên là bằng chứng local. Chưa có hosted CI/staging/produc
 2. Chưa thực hiện screen-reader acceptance thủ công.
 3. Browser suite chưa phủ đầy đủ two-tab conflict, media upload/delete, release
    rollback và cross-tenant flows.
-4. Chưa có remote nên chưa push, chưa chạy hosted CI.
+4. Hosted CI đã xanh; branch protection/required-check policy chưa được cấu hình.
 5. Chưa có staging/production server inventory, secrets, TLS/systemd/worker và
    backup schedule evidence.
 
@@ -98,20 +100,21 @@ Các con số trên là bằng chứng local. Chưa có hosted CI/staging/produc
 
 ## 5. Các phase tiếp theo
 
-### Phase D — Integration and Hosted CI
+### Phase D — Integration and Hosted CI (CI hoàn tất, governance còn mở)
 
-Mục tiêu: đưa mốc `b493ab4` lên repository dùng chung và có bằng chứng CI độc lập.
+Mục tiêu: đưa mốc tích hợp lên repository dùng chung và có bằng chứng CI độc lập.
 
-- Cấu hình Git remote và branch protection.
-- Push nhánh tích hợp/feature, mở PR và chạy toàn bộ workflow.
-- Xác nhận CI PostgreSQL, browser, shell operation guards và dependency audit.
-- Lưu artifact Playwright, build logs và test summary.
-- Chỉ merge remote khi mọi required check xanh.
+- [x] Cấu hình Git remote và push nhánh `main`.
+- [x] Sửa dependency install cho Vite+, sinh Wayfinder form variants và bảo đảm build
+  assets trước application tests trên runner sạch.
+- [x] Xác nhận hosted `ci` và `browser` PASS trên commit `837df40`.
+- [ ] Cấu hình branch protection/required checks và quy trình PR phù hợp với repository.
+- [ ] Chuẩn hóa retention/upload cho Playwright artifacts và test summary nếu cần lưu dài hạn.
 
-Điều kiện hoàn thành: hosted CI PASS trên commit bất biến; không chỉ dựa vào local.
+Điều kiện kỹ thuật hosted CI đã đạt. Phase chỉ đóng hoàn toàn sau khi branch governance
+được cấu hình và kiểm tra bằng một PR thật.
 
-Phụ thuộc: cần repository URL và quyền push. Nếu chưa có, có thể triển khai Phase E
-local song song.
+Phụ thuộc còn lại: quyền quản trị repository để cấu hình branch rules.
 
 ### Phase E — Reliability Closure
 
@@ -183,23 +186,22 @@ khôi phục được và rollback đã diễn tập trên cùng loại hạ t�
 ## 6. Thứ tự đề xuất
 
 ```text
-Phase D (khi có remote)
-        └── hosted CI evidence
+Phase D hosted CI ✓
+        └── branch governance còn mở
 
 Phase E → Phase F → Phase G → Phase H
                            └──────────────┐
 Phase D + local phases hoàn tất ─────────┴→ Phase I
 ```
 
-Ưu tiên thực thi ngay: **Phase E — Reliability Closure**. Phase D nên được kích
-hoạt song song ngay khi có remote; không cần để thiếu remote chặn công việc local.
+Ưu tiên thực thi ngay: đóng branch governance của **Phase D**, sau đó bắt đầu
+**Phase E — Reliability Closure**.
 
 ## 7. Git packaging hiện tại
 
-- `operations/phase-c` đã tích hợp toàn bộ Homepage/Starter Set qua `b493ab4`;
-  `feature/homepage-starter-set` giữ mốc review `b493ab4`.
+- `main` theo dõi `origin/main`; hosted CI đã PASS tại `837df40`.
+- `feature/homepage-starter-set` giữ mốc review `b493ab4`.
 - `verification/phase-b` giữ mốc `ffdd70d`.
 - `stabilization/phase-a` giữ mốc `c2f2eff`.
-- `master` vẫn ở mốc lịch sử `ec7e074`; chưa fast-forward vì chưa có quyết định
-  nhánh release/remote.
-- Không tuyên bố hosted CI hoặc deployment pass trước khi có bằng chứng bên ngoài.
+- `master` vẫn ở mốc lịch sử `ec7e074`.
+- Chưa tuyên bố staging hoặc production deployment pass.
