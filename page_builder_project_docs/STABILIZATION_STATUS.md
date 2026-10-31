@@ -33,7 +33,8 @@ session handoff giữ bằng chứng lịch sử chi tiết.
 - Frontend tests: 409/409 PASS.
 - Backend Pint/PHPStan: PASS, 0 lỗi.
 - SQLite/default backend suite: 337 PASS, 26 PostgreSQL-only skipped, 0 fail.
-- PostgreSQL 18 disposable suite `pentagon_test`: 36/36 PASS, 220 assertions.
+- PostgreSQL 18 disposable suite `pentagon_test`: 36/36 PASS, 224 assertions on final rerun.
+- Dependency audit: npm runtime 0 vulnerabilities; Composer 0 advisories after upgrading Symfony Mime/Mailer to 7.4.22.
 - `git diff --check`: PASS; chỉ có cảnh báo line-ending CRLF trên năm fixture/test cũ.
 - Hosted CI, browser E2E, visual regression, screen reader và production deploy: NOT VERIFIED.
 
