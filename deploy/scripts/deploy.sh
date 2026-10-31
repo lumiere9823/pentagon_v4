@@ -89,6 +89,7 @@ rm -rf node_modules
 # 6. Database migrations & Cache warmups
 echo "=== [6/8] Running database migrations and warming caches ==="
 php artisan migrate --force --isolated
+php artisan websites:backfill-homepages --commit
 php artisan config:cache
 php artisan route:cache
 php artisan view:cache
