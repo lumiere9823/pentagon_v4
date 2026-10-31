@@ -8,6 +8,18 @@ use App\Domains\DocumentEngine\Validation\ValidationError;
 
 class ComponentDefinition
 {
+    private const INSPECTOR_GROUPS = ['content', 'style', 'settings'];
+
+    private const INSPECTOR_CONTROLS = [
+        'text',
+        'textarea',
+        'url',
+        'media',
+        'select',
+        'toggle',
+        'faq-list',
+    ];
+
     /**
      * @param  string  $type  Component type identifier
      * @param  string  $label  Human-readable name
@@ -23,7 +35,18 @@ class ComponentDefinition
         public readonly bool $allowChildren,
         public readonly bool $canBeRoot,
         public readonly array $propSchemas = [],
-    ) {}
+    ) {
+        foreach ($this->propSchemas as $key => $schema) {
+            $primitive = $schema['stylePrimitive'] ?? null;
+            if ($primitive === null) {
+                continue;
+            }
+            if (! is_string($primitive) || $primitive === '') {
+                throw new \LogicException("Invalid style primitive metadata for {$this->type}.{$key}.");
+            }
+            StylePrimitiveCatalog::assertCompatible($primitive, $schema, "{$this->type}.{$key}");
+        }
+    }
 
     /**
      * Validate and sanitize a single property value against its schema definition.
@@ -414,17 +437,77 @@ class ComponentDefinition
     }
 
     /**
+     * @param  list<string>  $responsiveProps
      * @return array<string, mixed> Public metadata for editor client
      */
-    public function toMetadata(): array
+    public function toMetadata(array $responsiveProps = []): array
     {
+        $publicPropSchemas = [];
+        $inspectorProperties = [];
+
+        foreach ($this->propSchemas as $key => $schema) {
+            $inspector = $schema['inspector'] ?? null;
+            unset($schema['inspector']);
+            $schema['responsive'] = in_array($key, $responsiveProps, true);
+            $publicPropSchemas[$key] = $schema;
+
+            if (! is_array($inspector)) {
+                continue;
+            }
+
+            $group = $inspector['group'] ?? null;
+            $control = $inspector['control'] ?? null;
+            $label = $inspector['label'] ?? null;
+
+            if (
+                ! is_string($group) ||
+                ! in_array($group, self::INSPECTOR_GROUPS, true) ||
+                ! is_string($control) ||
+                ! in_array($control, self::INSPECTOR_CONTROLS, true) ||
+                ! is_string($label) ||
+                $label === ''
+            ) {
+                throw new \LogicException("Invalid Inspector metadata for {$this->type}.{$key}.");
+            }
+
+            $property = [
+                'key' => $key,
+                'path' => "props.{$key}",
+                'label' => $label,
+                'group' => $group,
+                'control' => $control,
+                'responsive' => $schema['responsive'],
+            ];
+
+            foreach (['type', 'required', 'default', 'enum', 'maxLength', 'min', 'max', 'maxItems', 'isUrl', 'isHtml', 'itemSchema', 'stylePrimitive'] as $constraint) {
+                if (array_key_exists($constraint, $schema)) {
+                    $property[$constraint] = $schema[$constraint];
+                }
+            }
+
+            $inspectorProperties[] = $property;
+        }
+
+        $inspectorProperties[] = [
+            'key' => 'display',
+            'path' => 'styles.*.display',
+            'label' => 'Component Visibility',
+            'group' => 'style',
+            'control' => 'select',
+            'responsive' => true,
+            'type' => 'string',
+            'default' => 'visible',
+            'enum' => ['visible', 'hidden'],
+        ];
+
         return [
             'type' => $this->type,
             'label' => $this->label,
             'category' => $this->category,
             'allowChildren' => $this->allowChildren,
             'canBeRoot' => $this->canBeRoot,
-            'props' => $this->propSchemas,
+            'props' => $publicPropSchemas,
+            'inspector' => $inspectorProperties,
         ];
     }
 }

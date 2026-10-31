@@ -68,8 +68,18 @@ class PagePersistenceService
             ];
         }
 
+        $canonicalDocument = $validationResult->getSanitizedDocument();
+        if ($canonicalDocument === null) {
+            return [
+                'success' => false,
+                'status' => 422,
+                'error' => 'validation_failed',
+                'message' => 'The document could not be canonicalized.',
+            ];
+        }
+
         // 2. Pre-transaction scan of incoming document media references
-        $inspection = $this->scanner->inspectAssetReferences($document, $website);
+        $inspection = $this->scanner->inspectAssetReferences($canonicalDocument, $website);
         if ($inspection['indeterminate']) {
             return [
                 'success' => false,
@@ -94,7 +104,7 @@ class PagePersistenceService
         return DB::transaction(function () use (
             $page,
             $website,
-            $document,
+            $canonicalDocument,
             $submittedLockVersion,
             $user,
             $changeSummary,
@@ -171,7 +181,7 @@ class PagePersistenceService
             }
 
             // 9. Update page document and increment lock_version
-            $lockedPage->document_json = $document;
+            $lockedPage->document_json = $canonicalDocument;
             if ($seoMetadata !== null) {
                 $lockedPage->seo_metadata = (new PageSeoManager)->normalizeSeoMetadata($seoMetadata);
             }
@@ -182,7 +192,7 @@ class PagePersistenceService
             // 10. Revision Creation Policy (D-028)
             $createdRevision = $this->evaluateAndCreateRevision(
                 $lockedPage,
-                $document,
+                $canonicalDocument,
                 $user,
                 $changeSummary,
                 $isAutosave
@@ -245,8 +255,18 @@ class PagePersistenceService
             ];
         }
 
+        $canonicalDocument = $validationResult->getSanitizedDocument();
+        if ($canonicalDocument === null) {
+            return [
+                'success' => false,
+                'status' => 422,
+                'error' => 'validation_failed',
+                'message' => 'Historical revision document could not be canonicalized.',
+            ];
+        }
+
         // 2. Scan media references in restored document
-        $inspection = $this->scanner->inspectAssetReferences($restoredDoc, $website);
+        $inspection = $this->scanner->inspectAssetReferences($canonicalDocument, $website);
         if ($inspection['indeterminate']) {
             return [
                 'success' => false,
@@ -272,7 +292,7 @@ class PagePersistenceService
             $page,
             $website,
             $targetRevision,
-            $restoredDoc,
+            $canonicalDocument,
             $newAssetIds,
             $user
         ) {
@@ -336,7 +356,7 @@ class PagePersistenceService
             $nextRevisionNumber = $maxRevNumber + 1;
 
             // Update page working draft and increment lock_version
-            $lockedPage->document_json = $restoredDoc;
+            $lockedPage->document_json = $canonicalDocument;
             $lockedPage->lock_version = $lockedPage->lock_version + 1;
             $lockedPage->updated_by = $user->id;
             $lockedPage->save();
@@ -346,8 +366,8 @@ class PagePersistenceService
                 'page_id' => $lockedPage->id,
                 'revision_number' => $nextRevisionNumber,
                 'schema_version' => 1,
-                'document_json' => $restoredDoc,
-                'document_hash' => PageRevision::canonicalizeDocument($restoredDoc),
+                'document_json' => $canonicalDocument,
+                'document_hash' => PageRevision::canonicalizeDocument($canonicalDocument),
                 'change_summary' => "Restored from Revision #{$targetRevision->revision_number}",
                 'is_autosave' => false,
                 'created_by' => $user->id,
@@ -360,7 +380,7 @@ class PagePersistenceService
                 'message' => "Successfully rolled back to Revision #{$targetRevision->revision_number}.",
                 'lock_version' => $lockedPage->lock_version,
                 'updated_at' => $lockedPage->updated_at?->toIso8601String(),
-                'document_json' => $restoredDoc,
+                'document_json' => $canonicalDocument,
                 'revision_id' => $newRevision->id,
                 'revision_number' => $newRevision->revision_number,
             ];

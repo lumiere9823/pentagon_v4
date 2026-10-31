@@ -3,6 +3,7 @@
 namespace Tests\Feature\Websites;
 
 use App\Enums\WebsiteRole;
+use App\Models\PageTemplate;
 use App\Models\User;
 use App\Models\Website;
 use App\Models\WebsiteMembership;
@@ -185,5 +186,33 @@ class WebsiteManagementTest extends TestCase
 
         $response->assertRedirect(route('websites.index'));
         $this->assertDatabaseMissing('websites', ['id' => $website->id]);
+    }
+
+    public function test_show_website_renders_pages_and_custom_templates(): void
+    {
+        $owner = User::factory()->create();
+        $website = Website::factory()->create(['owner_id' => $owner->id]);
+        WebsiteMembership::factory()->create([
+            'website_id' => $website->id,
+            'user_id' => $owner->id,
+            'role' => WebsiteRole::OWNER,
+        ]);
+
+        PageTemplate::factory()->forWebsite($website)->create([
+            'name' => 'Custom Hero Template',
+            'slug' => 'custom-hero-template',
+            'category' => 'landing',
+        ]);
+
+        $response = $this->actingAs($owner)->get(route('websites.show', $website));
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->component('Websites/Show')
+            ->where('website.id', $website->id)
+            ->where('can.manage_templates', true)
+            ->has('templates', 1)
+            ->where('templates.0.name', 'Custom Hero Template')
+        );
     }
 }

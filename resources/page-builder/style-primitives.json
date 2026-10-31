@@ -1,0 +1,74 @@
+{
+    "spacing.sectionPadding": {
+        "category": "spacing",
+        "type": "string",
+        "values": ["none", "small", "medium", "large"],
+        "responsive": true
+    },
+    "spacing.block": {
+        "category": "spacing",
+        "type": "string",
+        "values": ["none", "small", "medium", "large"],
+        "responsive": true
+    },
+    "spacing.layoutGap": {
+        "category": "spacing",
+        "type": "string",
+        "values": ["small", "medium", "large"],
+        "responsive": true
+    },
+    "spacing.spacerHeight": {
+        "category": "spacing",
+        "type": "string",
+        "values": ["small", "medium", "large", "xlarge"],
+        "responsive": true
+    },
+    "dimensions.maxWidth": {
+        "category": "dimensions",
+        "type": "string",
+        "values": ["sm", "md", "lg", "xl", "full"],
+        "responsive": true
+    },
+    "dimensions.aspectRatio": {
+        "category": "dimensions",
+        "type": "string",
+        "values": ["auto", "16:9", "4:3", "1:1"],
+        "responsive": true
+    },
+    "dimensions.controlSize": {
+        "category": "dimensions",
+        "type": "string",
+        "values": ["sm", "md", "lg"],
+        "responsive": true
+    },
+    "typography.align": {
+        "category": "typography",
+        "type": "string",
+        "values": ["left", "center", "right"],
+        "responsive": true
+    },
+    "typography.fontSize": {
+        "category": "typography",
+        "type": "string",
+        "values": ["semantic", "small", "medium", "large", "xlarge"],
+        "responsive": true
+    },
+    "color.foreground": {
+        "category": "color",
+        "type": "string",
+        "values": ["foreground", "soft", "muted", "primary"],
+        "responsive": true
+    },
+    "color.background": {
+        "category": "color",
+        "type": "string",
+        "values": ["transparent", "muted", "primary", "dark"],
+        "responsive": true
+    },
+    "color.border": {
+        "category": "color",
+        "type": "string",
+        "values": ["muted", "primary", "subtle"],
+        "responsive": true
+    }
+}

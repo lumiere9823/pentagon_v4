@@ -23,20 +23,26 @@ class PageRevisionController extends Controller
 
         $this->authorize('view', $page);
 
-        $revisions = $page->revisions()
+        $query = $page->revisions()
             ->with(['creator:id,name'])
-            ->orderBy('revision_number', 'desc')
-            ->get([
-                'id',
-                'page_id',
-                'revision_number',
-                'schema_version',
-                'document_hash',
-                'change_summary',
-                'is_autosave',
-                'created_by',
-                'created_at',
-            ]);
+            ->orderBy('revision_number', 'desc');
+
+        if ($request->filled('limit')) {
+            $limit = min(max((int) $request->query('limit'), 1), 100);
+            $query->limit($limit);
+        }
+
+        $revisions = $query->get([
+            'id',
+            'page_id',
+            'revision_number',
+            'schema_version',
+            'document_hash',
+            'change_summary',
+            'is_autosave',
+            'created_by',
+            'created_at',
+        ]);
 
         return response()->json([
             'revisions' => $revisions,

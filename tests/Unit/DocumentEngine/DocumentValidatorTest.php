@@ -3,6 +3,7 @@
 namespace Tests\Unit\DocumentEngine;
 
 use App\Domains\DocumentEngine\DocumentLimits;
+use App\Domains\DocumentEngine\Schema\StylePrimitiveCatalog;
 use App\Domains\DocumentEngine\Validation\DocumentValidator;
 use Tests\TestCase;
 
@@ -14,6 +15,61 @@ class DocumentValidatorTest extends TestCase
     {
         parent::setUp();
         $this->validator = new DocumentValidator;
+    }
+
+    public function test_nonresponsive_primitive_remains_valid_at_base_but_is_rejected_in_overrides(): void
+    {
+        $reflection = new \ReflectionClass(StylePrimitiveCatalog::class);
+        $definitions = $reflection->getProperty('definitions');
+        $original = StylePrimitiveCatalog::all();
+        $modified = $original;
+        $modified['dimensions.controlSize']['responsive'] = false;
+        $definitions->setValue(null, $modified);
+
+        try {
+            $validator = new DocumentValidator;
+            $document = [
+                'schemaVersion' => 1,
+                'root' => [
+                    'id' => 'root_section',
+                    'type' => 'Section',
+                    'props' => [],
+                    'children' => [[
+                        'id' => 'button_node',
+                        'type' => 'Button',
+                        'props' => [
+                            'label' => 'Button',
+                            'url' => '/',
+                            'size' => 'lg',
+                        ],
+                    ]],
+                ],
+            ];
+
+            $baseResult = $validator->validate($document);
+            $this->assertTrue($baseResult->isValid());
+            $this->assertSame(
+                'lg',
+                $baseResult->getSanitizedDocument()['root']['children'][0]['props']['size'],
+            );
+
+            $document['root']['children'][0]['styles'] = [
+                'tablet' => ['size' => 'sm'],
+            ];
+            $result = $validator->validate($document);
+
+            $this->assertFalse($result->isValid());
+            $this->assertSame(
+                'root.children[0].styles.tablet.size',
+                $result->getErrors()[0]->getPath(),
+            );
+            $this->assertSame(
+                'disallowed_style_override',
+                $result->getErrors()[0]->getCode(),
+            );
+        } finally {
+            $definitions->setValue(null, $original);
+        }
     }
 
     public function test_validates_minimal_document_successfully(): void
@@ -40,6 +96,70 @@ class DocumentValidatorTest extends TestCase
         $this->assertTrue($result->isValid(), 'Document with all 12 core components should pass validation.');
         $this->assertEmpty($result->getErrors());
         $this->assertNotNull($result->getSanitizedDocument());
+    }
+
+    public function test_canonicalizes_all_registered_aliases_deterministically_and_idempotently(): void
+    {
+        $document = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'canonical_root',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [
+                    [
+                        'id' => 'canonical_rich_text',
+                        'type' => 'Rich Text',
+                        'props' => [
+                            'content' => '<p onclick="alert(1)">Keep <strong>this</strong></p><script>alert(2)</script>',
+                        ],
+                        'children' => [],
+                    ],
+                    [
+                        'id' => 'canonical_card_grid',
+                        'type' => 'Card Grid',
+                        'props' => [],
+                        'children' => [[
+                            'id' => 'canonical_faq',
+                            'type' => 'FAQ',
+                            'props' => [
+                                'items' => [[
+                                    'question' => 'Does content survive?',
+                                    'answer' => '<p>Yes <em>it does</em></p><img src=x onerror=alert(3)>',
+                                ]],
+                            ],
+                            'children' => [],
+                        ]],
+                    ],
+                ],
+            ],
+            'pageSettings' => [
+                'title' => 'Canonical Page',
+                'description' => 'Preserve this description',
+            ],
+        ];
+
+        $firstResult = $this->validator->validate($document);
+
+        $this->assertTrue($firstResult->isValid());
+        $canonical = $firstResult->getSanitizedDocument();
+        $this->assertNotNull($canonical);
+        $this->assertSame('RichText', $canonical['root']['children'][0]['type']);
+        $this->assertSame('CardGrid', $canonical['root']['children'][1]['type']);
+        $this->assertSame(['padding' => 'medium', 'background' => 'transparent'], $canonical['root']['props']);
+        $this->assertSame(['columns' => 3, 'gap' => 'medium'], $canonical['root']['children'][1]['props']);
+        $this->assertSame('Does content survive?', $canonical['root']['children'][1]['children'][0]['props']['items'][0]['question']);
+        $this->assertSame('Canonical Page', $canonical['pageSettings']['title']);
+        $this->assertStringContainsString('<strong>this</strong>', $canonical['root']['children'][0]['props']['content']);
+        $this->assertStringNotContainsString('onclick', $canonical['root']['children'][0]['props']['content']);
+        $this->assertStringNotContainsString('<script', $canonical['root']['children'][0]['props']['content']);
+        $this->assertStringContainsString('<em>it does</em>', $canonical['root']['children'][1]['children'][0]['props']['items'][0]['answer']);
+        $this->assertStringNotContainsString('onerror', $canonical['root']['children'][1]['children'][0]['props']['items'][0]['answer']);
+
+        $secondResult = $this->validator->validate($canonical);
+
+        $this->assertTrue($secondResult->isValid());
+        $this->assertSame($canonical, $secondResult->getSanitizedDocument());
     }
 
     public function test_rejects_malformed_json_syntax(): void
@@ -316,6 +436,52 @@ class DocumentValidatorTest extends TestCase
         $this->assertFalse($result->isValid());
         $this->assertTrue($result->hasError('root.children[0].props.url'));
         $this->assertEquals('unsafe_url', $result->firstError()?->getCode());
+    }
+
+    public function test_publish_validation_rejects_empty_image_source_with_node_path(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec_01',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [[
+                    'id' => 'image_empty_01',
+                    'type' => 'Image',
+                    'props' => ['src' => '   ', 'alt' => 'Missing'],
+                    'children' => [],
+                ]],
+            ],
+        ];
+
+        $result = $this->validator->validateForPublishing($doc);
+
+        $this->assertFalse($result->isValid());
+        $this->assertTrue($result->hasError('root.children[0].props.src'));
+        $this->assertSame('empty_image_source', $result->firstError()?->getCode());
+    }
+
+    public function test_publish_validation_accepts_safe_external_and_media_image_sources(): void
+    {
+        foreach (['https://cdn.example.com/photo.jpg', '/storage/media/12/photo.jpg', 'storage/media/12/photo.jpg'] as $src) {
+            $doc = [
+                'schemaVersion' => 1,
+                'root' => [
+                    'id' => 'root_sec_01',
+                    'type' => 'Section',
+                    'props' => [],
+                    'children' => [[
+                        'id' => 'image_valid_01',
+                        'type' => 'Image',
+                        'props' => ['src' => $src, 'alt' => 'Valid'],
+                        'children' => [],
+                    ]],
+                ],
+            ];
+
+            $this->assertTrue($this->validator->validateForPublishing($doc)->isValid(), "Source '{$src}' should be publishable.");
+        }
     }
 
     public function test_rejects_tree_exceeding_depth_limit(): void
@@ -633,5 +799,423 @@ class DocumentValidatorTest extends TestCase
         $this->assertFalse($res3->isValid());
         $this->assertTrue($res3->hasError('root.styles.tablet.display'));
         $this->assertEquals('invalid_enum_value', $res3->firstError()?->getCode());
+    }
+
+    public function test_rejects_invalid_style_primitive_values_in_base_and_responsive_props(): void
+    {
+        $base = $this->validator->validate([
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'section_invalid_primitive',
+                'type' => 'Section',
+                'children' => [[
+                    'id' => 'heading_invalid_primitive',
+                    'type' => 'Heading',
+                    'props' => [
+                        'text' => 'Heading',
+                        'level' => 2,
+                        'fontSize' => 'calc(100vw)',
+                    ],
+                    'children' => [],
+                ]],
+            ],
+        ]);
+        $this->assertFalse($base->isValid());
+        $this->assertSame('invalid_enum_value', $base->firstError()?->getCode());
+
+        $responsive = $this->validator->validate([
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'section_invalid_responsive_primitive',
+                'type' => 'Section',
+                'children' => [[
+                    'id' => 'rich_invalid_primitive',
+                    'type' => 'RichText',
+                    'props' => ['content' => '<p>Text</p>'],
+                    'styles' => ['mobile' => ['textColor' => 'url(javascript:alert(1))']],
+                    'children' => [],
+                ]],
+            ],
+        ]);
+        $this->assertFalse($responsive->isValid());
+        $this->assertSame('invalid_enum_value', $responsive->firstError()?->getCode());
+    }
+
+    public function test_missing_locked_defaults_to_unlocked_and_is_omitted_from_sanitized_output(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_unlocked',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [
+                    [
+                        'id' => 'child_unlocked',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Hello', 'level' => 2],
+                    ],
+                ],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+        $this->assertTrue($result->isValid());
+        $sanitizedRoot = $result->getSanitizedDocument()['root'];
+        $this->assertArrayNotHasKey('locked', $sanitizedRoot);
+        $this->assertArrayNotHasKey('locked', $sanitizedRoot['children'][0]);
+    }
+
+    public function test_locked_true_survives_backend_sanitization(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec',
+                'type' => 'Section',
+                'props' => [],
+                'locked' => true,
+                'children' => [
+                    [
+                        'id' => 'child_locked',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Hello', 'level' => 2],
+                        'locked' => true,
+                    ],
+                ],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+        $this->assertTrue($result->isValid());
+        $sanitizedRoot = $result->getSanitizedDocument()['root'];
+        $this->assertTrue($sanitizedRoot['locked']);
+        $this->assertTrue($sanitizedRoot['children'][0]['locked']);
+    }
+
+    public function test_rejects_invalid_locked_types_with_invalid_locked_type_error(): void
+    {
+        $invalidTypes = [
+            'string' => 'true',
+            'integer' => 1,
+            'float' => 0.0,
+            'array' => [true],
+            'null' => null,
+        ];
+
+        foreach ($invalidTypes as $label => $val) {
+            $doc = [
+                'schemaVersion' => 1,
+                'root' => [
+                    'id' => "root_{$label}",
+                    'type' => 'Section',
+                    'props' => [],
+                    'locked' => $val,
+                    'children' => [],
+                ],
+            ];
+
+            $result = $this->validator->validate($doc);
+            $this->assertFalse($result->isValid(), "Lock value of type {$label} should be rejected.");
+            $this->assertSame('invalid_locked_type', $result->firstError()?->getCode());
+            $this->assertSame('root.locked', $result->firstError()?->getPath());
+        }
+    }
+
+    public function test_locked_false_is_valid_and_omitted_as_unlocked(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec',
+                'type' => 'Section',
+                'props' => [],
+                'locked' => false,
+                'children' => [],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+        $this->assertTrue($result->isValid());
+        $sanitizedRoot = $result->getSanitizedDocument()['root'];
+        $this->assertArrayNotHasKey('locked', $sanitizedRoot);
+    }
+
+    public function test_missing_hidden_defaults_to_visible_and_is_omitted_from_sanitized_output(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_visible',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [
+                    [
+                        'id' => 'child_visible',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Hello', 'level' => 2],
+                    ],
+                ],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+        $this->assertTrue($result->isValid());
+        $sanitizedRoot = $result->getSanitizedDocument()['root'];
+        $this->assertArrayNotHasKey('hidden', $sanitizedRoot);
+        $this->assertArrayNotHasKey('hidden', $sanitizedRoot['children'][0]);
+    }
+
+    public function test_hidden_true_survives_backend_sanitization_for_non_root_nodes(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [
+                    [
+                        'id' => 'child_hidden',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Hello', 'level' => 2],
+                        'hidden' => true,
+                    ],
+                ],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+        $this->assertTrue($result->isValid());
+        $sanitizedRoot = $result->getSanitizedDocument()['root'];
+        $this->assertArrayNotHasKey('hidden', $sanitizedRoot);
+        $this->assertTrue($sanitizedRoot['children'][0]['hidden']);
+    }
+
+    public function test_hidden_false_survives_backend_sanitization(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [
+                    [
+                        'id' => 'child_unhidden',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Hello', 'level' => 2],
+                        'hidden' => false,
+                    ],
+                ],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+        $this->assertTrue($result->isValid());
+        $sanitizedRoot = $result->getSanitizedDocument()['root'];
+        $this->assertFalse($sanitizedRoot['children'][0]['hidden']);
+    }
+
+    public function test_rejects_invalid_hidden_types_with_invalid_hidden_type_error(): void
+    {
+        $invalidTypes = [
+            'string' => 'true',
+            'integer' => 1,
+            'float' => 0.0,
+            'array' => [true],
+            'null' => null,
+        ];
+
+        foreach ($invalidTypes as $label => $val) {
+            $doc = [
+                'schemaVersion' => 1,
+                'root' => [
+                    'id' => 'root_sec',
+                    'type' => 'Section',
+                    'props' => [],
+                    'children' => [
+                        [
+                            'id' => "child_{$label}",
+                            'type' => 'Heading',
+                            'props' => ['text' => 'Hello', 'level' => 2],
+                            'hidden' => $val,
+                        ],
+                    ],
+                ],
+            ];
+
+            $result = $this->validator->validate($doc);
+            $this->assertFalse($result->isValid(), "Hidden value of type {$label} should be rejected.");
+            $this->assertSame('invalid_hidden_type', $result->firstError()?->getCode());
+            $this->assertSame('root.children[0].hidden', $result->firstError()?->getPath());
+        }
+    }
+
+    public function test_root_cannot_be_hidden_and_is_rejected_with_root_cannot_be_hidden(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec',
+                'type' => 'Section',
+                'props' => [],
+                'hidden' => true,
+                'children' => [],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+        $this->assertFalse($result->isValid());
+        $this->assertSame('root_cannot_be_hidden', $result->firstError()?->getCode());
+        $this->assertSame('root.hidden', $result->firstError()?->getPath());
+    }
+
+    public function test_valid_node_label_survives_backend_sanitization(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec',
+                'type' => 'Section',
+                'props' => [],
+                'label' => 'Main Hero Section',
+                'children' => [
+                    [
+                        'id' => 'child_btn',
+                        'type' => 'Button',
+                        'props' => ['label' => 'Click', 'url' => '#'],
+                        'label' => 'Primary CTA',
+                        'children' => [],
+                    ],
+                ],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+        $this->assertTrue($result->isValid());
+
+        $sanitizedRoot = $result->getSanitizedDocument()['root'];
+        $this->assertSame('Main Hero Section', $sanitizedRoot['label']);
+        $this->assertSame('Primary CTA', $sanitizedRoot['children'][0]['label']);
+    }
+
+    public function test_node_label_is_trimmed_and_stripped_of_html_tags(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [
+                    [
+                        'id' => 'child_heading',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Title', 'level' => 1],
+                        'label' => '   <b>Featured</b> Heading   ',
+                        'children' => [],
+                    ],
+                ],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+        $this->assertTrue($result->isValid());
+
+        $sanitizedChild = $result->getSanitizedDocument()['root']['children'][0];
+        $this->assertSame('Featured Heading', $sanitizedChild['label']);
+    }
+
+    public function test_empty_or_null_node_label_is_omitted_from_sanitized_output(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec',
+                'type' => 'Section',
+                'props' => [],
+                'label' => '   ',
+                'children' => [
+                    [
+                        'id' => 'child_heading',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Title', 'level' => 1],
+                        'label' => null,
+                        'children' => [],
+                    ],
+                    [
+                        'id' => 'child_btn',
+                        'type' => 'Button',
+                        'props' => ['label' => 'Click', 'url' => '#'],
+                        'children' => [],
+                    ],
+                ],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+        $this->assertTrue($result->isValid());
+
+        $sanitizedRoot = $result->getSanitizedDocument()['root'];
+        $this->assertArrayNotHasKey('label', $sanitizedRoot);
+        $this->assertArrayNotHasKey('label', $sanitizedRoot['children'][0]);
+        $this->assertArrayNotHasKey('label', $sanitizedRoot['children'][1]);
+    }
+
+    public function test_rejects_invalid_node_label_types_with_invalid_label_type(): void
+    {
+        $invalidTypes = [123, true, false, ['array'], 3.14];
+
+        foreach ($invalidTypes as $val) {
+            $doc = [
+                'schemaVersion' => 1,
+                'root' => [
+                    'id' => 'root_sec',
+                    'type' => 'Section',
+                    'props' => [],
+                    'children' => [
+                        [
+                            'id' => 'child_heading',
+                            'type' => 'Heading',
+                            'props' => ['text' => 'Title', 'level' => 1],
+                            'label' => $val,
+                            'children' => [],
+                        ],
+                    ],
+                ],
+            ];
+
+            $result = $this->validator->validate($doc);
+            $this->assertFalse($result->isValid());
+            $this->assertSame('invalid_label_type', $result->firstError()?->getCode());
+            $this->assertSame('root.children[0].label', $result->firstError()?->getPath());
+        }
+    }
+
+    public function test_rejects_node_label_exceeding_max_length_with_label_too_long(): void
+    {
+        $doc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [
+                    [
+                        'id' => 'child_heading',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Title', 'level' => 1],
+                        'label' => str_repeat('A', 65),
+                        'children' => [],
+                    ],
+                ],
+            ],
+        ];
+
+        $result = $this->validator->validate($doc);
+        $this->assertFalse($result->isValid());
+        $this->assertSame('label_too_long', $result->firstError()?->getCode());
+        $this->assertSame('root.children[0].label', $result->firstError()?->getPath());
     }
 }

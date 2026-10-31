@@ -37,6 +37,11 @@ final class DocumentLimits
     public const int MAX_SHORT_STRING_LENGTH = 500;
 
     /**
+     * Maximum string length for custom node labels.
+     */
+    public const int MAX_LABEL_LENGTH = 64;
+
+    /**
      * Maximum length for URLs.
      */
     public const int MAX_URL_LENGTH = 2_048;

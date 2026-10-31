@@ -28,10 +28,16 @@ class PageReleaseController extends Controller
 
         Gate::authorize('view', $page);
 
-        $releases = $page->releases()
+        $query = $page->releases()
             ->with(['creator:id,name,email', 'revision:id,revision_number,change_summary'])
-            ->orderBy('release_number', 'desc')
-            ->get();
+            ->orderBy('release_number', 'desc');
+
+        if ($request->filled('limit')) {
+            $limit = min(max((int) $request->query('limit'), 1), 100);
+            $query->limit($limit);
+        }
+
+        $releases = $query->get();
 
         return response()->json([
             'releases' => $releases,

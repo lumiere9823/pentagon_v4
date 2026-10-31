@@ -55,7 +55,12 @@ class TemplateInstantiationService
             );
         }
 
-        return $instantiatedDoc;
+        $canonicalDocument = $validationResult->getSanitizedDocument();
+        if ($canonicalDocument === null) {
+            throw new InvalidArgumentException('Instantiated template could not be canonicalized.');
+        }
+
+        return $canonicalDocument;
     }
 
     /**

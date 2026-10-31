@@ -63,6 +63,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // Publishing Engine & Release Management (M16)
     Route::post('websites/{website}/pages/{page}/publish', [PagePublishingController::class, 'publish'])->name('websites.pages.publish');
+    Route::post('websites/{website}/pages/{page}/unpublish', [PagePublishingController::class, 'unpublish'])->name('websites.pages.unpublish');
     Route::get('websites/{website}/pages/{page}/releases', [PageReleaseController::class, 'index'])->name('websites.pages.releases.index');
     Route::post('websites/{website}/pages/{page}/releases/{release}/rollback', [PageReleaseController::class, 'rollback'])->name('websites.pages.releases.rollback');
 

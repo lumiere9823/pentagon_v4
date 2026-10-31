@@ -8,6 +8,7 @@ use App\Domains\Media\Services\MediaUsageScanner;
 use App\Domains\Publishing\Exceptions\MediaUnavailableException;
 use App\Domains\Publishing\Exceptions\PublishConcurrencyException;
 use App\Domains\Publishing\Exceptions\PublishFailedException;
+use App\Domains\Publishing\Exceptions\PublishValidationException;
 use App\Enums\MediaAssetStatus;
 use App\Enums\PageReleaseStatus;
 use App\Models\MediaAsset;
@@ -59,12 +60,23 @@ class PagePublishingService
                 throw new PublishFailedException('Cannot publish a page without document content.');
             }
 
-            $validation = $this->validator->validate($lockedPage->document_json);
+            $validation = $this->validator->validateForPublishing($lockedPage->document_json);
             if (! $validation->isValid()) {
-                throw new PublishFailedException('Document failed Schema v1 validation: '.implode('; ', array_map(fn ($e) => $e->getMessage(), $validation->getErrors())));
+                throw new PublishValidationException(
+                    'Document failed publish validation. Fix the highlighted component fields and try again.',
+                    array_map(fn ($error) => $error->toArray(), $validation->getErrors())
+                );
             }
 
-            $docHash = PageRevision::canonicalizeDocument($lockedPage->document_json);
+            $canonicalDocument = $validation->getSanitizedDocument();
+            if ($canonicalDocument === null) {
+                throw new PublishValidationException(
+                    'Document failed canonicalization and cannot be published.',
+                    []
+                );
+            }
+
+            $docHash = PageRevision::canonicalizeDocument($canonicalDocument);
 
             /** @var PageRevision|null $latestRev */
             $latestRev = PageRevision::where('page_id', $lockedPage->id)
@@ -72,7 +84,18 @@ class PagePublishingService
                 ->lockForUpdate()
                 ->first();
 
-            if ($latestRev !== null && $latestRev->document_hash === $docHash) {
+            $latestCanonicalHash = null;
+            if ($latestRev !== null) {
+                $latestValidation = $this->validator->validateForPublishing($latestRev->document_json);
+                $latestCanonicalDocument = $latestValidation->isValid()
+                    ? $latestValidation->getSanitizedDocument()
+                    : null;
+                if ($latestCanonicalDocument !== null) {
+                    $latestCanonicalHash = PageRevision::canonicalizeDocument($latestCanonicalDocument);
+                }
+            }
+
+            if ($latestRev !== null && $latestCanonicalHash === $docHash) {
                 $targetRev = $latestRev;
             } else {
                 $nextRevNum = ($latestRev !== null ? $latestRev->revision_number : 0) + 1;
@@ -80,7 +103,7 @@ class PagePublishingService
                     'page_id' => $lockedPage->id,
                     'revision_number' => $nextRevNum,
                     'schema_version' => 1,
-                    'document_json' => $lockedPage->document_json,
+                    'document_json' => $canonicalDocument,
                     'document_hash' => $docHash,
                     'change_summary' => 'Published release',
                     'is_autosave' => false,
@@ -90,7 +113,7 @@ class PagePublishingService
 
             // D-023 Advisory Lock scoping for referenced media
             $website = $lockedPage->website ?? Website::findOrFail($lockedPage->website_id);
-            $inspection = $this->mediaScanner->inspectAssetReferences($targetRev->document_json, $website);
+            $inspection = $this->mediaScanner->inspectAssetReferences($canonicalDocument, $website);
 
             if ($inspection['indeterminate'] || $inspection['has_foreign_media'] || ! empty($inspection['unresolved_media_paths'])) {
                 throw new MediaUnavailableException('One or more media assets referenced in this document are unavailable or foreign.');

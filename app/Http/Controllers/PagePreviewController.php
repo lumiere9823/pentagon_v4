@@ -115,18 +115,11 @@ class PagePreviewController extends Controller
      */
     protected function renderPreviewResponse(array $document, string $pageTitle): Response
     {
+        $banner = '<div class="bg-amber-500 text-black px-4 py-2 text-center text-sm font-semibold sticky top-0 z-50 shadow-md">PREVIEW MODE &mdash; Draft snapshot, not for public distribution</div>';
         $renderedHtml = $this->renderer->renderDocument($document, [
             'title' => $pageTitle.' (Preview)',
             'description' => 'Preview mode draft snapshot',
-        ], true);
-
-        // Inject preview watermark banner immediately inside <body>
-        $banner = '<div class="bg-amber-500 text-black px-4 py-2 text-center text-sm font-semibold sticky top-0 z-50 shadow-md">PREVIEW MODE &mdash; Draft snapshot, not for public distribution</div>';
-        if (str_contains($renderedHtml, '<body>')) {
-            $renderedHtml = str_replace('<body>', "<body>\n{$banner}", $renderedHtml);
-        } else {
-            $renderedHtml = "{$banner}\n{$renderedHtml}";
-        }
+        ], true, $banner);
 
         return response($renderedHtml, 200, [
             'Content-Type' => 'text/html; charset=UTF-8',

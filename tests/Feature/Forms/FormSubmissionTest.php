@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Website;
 use App\Models\WebsiteMembership;
 use Illuminate\Support\Facades\RateLimiter;
+use Inertia\Testing\AssertableInertia as Assert;
 
 beforeEach(function () {
     RateLimiter::clear('public-forms');
@@ -119,4 +120,97 @@ test('unauthorized users cannot access website submissions', function () {
     $response = $this->actingAs($unrelatedUser)->getJson("/websites/{$website->id}/submissions");
 
     $response->assertStatus(403);
+});
+
+test('authorized website members can view submissions via Inertia page', function () {
+    $user = User::factory()->create();
+    $website = Website::factory()->create(['name' => 'Acme Agency', 'slug' => 'acme']);
+    WebsiteMembership::factory()->create([
+        'website_id' => $website->id,
+        'user_id' => $user->id,
+        'role' => 'editor',
+    ]);
+
+    FormSubmission::factory()->create([
+        'website_id' => $website->id,
+        'form_name' => 'newsletter',
+        'status' => 'new',
+    ]);
+    FormSubmission::factory()->create([
+        'website_id' => $website->id,
+        'form_name' => 'contact',
+        'status' => 'read',
+    ]);
+
+    $response = $this->actingAs($user)->get("/websites/{$website->id}/submissions");
+
+    $response->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Websites/Submissions')
+            ->where('website.id', $website->id)
+            ->where('website.name', 'Acme Agency')
+            ->where('website.slug', 'acme')
+            ->where('userRole', 'editor')
+            ->where('can.manage_submissions', true)
+            ->where('distinctFormNames', ['contact', 'newsletter'])
+            ->has('submissions.data', 2)
+        );
+});
+
+test('viewers have read-only access to submissions page', function () {
+    $viewer = User::factory()->create();
+    $website = Website::factory()->create();
+    WebsiteMembership::factory()->create([
+        'website_id' => $website->id,
+        'user_id' => $viewer->id,
+        'role' => 'viewer',
+    ]);
+
+    FormSubmission::factory()->create(['website_id' => $website->id]);
+
+    $response = $this->actingAs($viewer)->get("/websites/{$website->id}/submissions");
+
+    $response->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Websites/Submissions')
+            ->where('userRole', 'viewer')
+            ->where('can.manage_submissions', false)
+            ->has('submissions.data', 1)
+        );
+});
+
+test('submissions listing can be filtered by form_name and status', function () {
+    $user = User::factory()->create();
+    $website = Website::factory()->create();
+    WebsiteMembership::factory()->create([
+        'website_id' => $website->id,
+        'user_id' => $user->id,
+        'role' => 'editor',
+    ]);
+
+    FormSubmission::factory()->create([
+        'website_id' => $website->id,
+        'form_name' => 'contact',
+        'status' => 'new',
+    ]);
+    FormSubmission::factory()->create([
+        'website_id' => $website->id,
+        'form_name' => 'contact',
+        'status' => 'archived',
+    ]);
+    FormSubmission::factory()->create([
+        'website_id' => $website->id,
+        'form_name' => 'newsletter',
+        'status' => 'new',
+    ]);
+
+    $filteredResponse = $this->actingAs($user)->get("/websites/{$website->id}/submissions?form_name=contact&status=new");
+
+    $filteredResponse->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Websites/Submissions')
+            ->where('filters.form_name', 'contact')
+            ->where('filters.status', 'new')
+            ->has('submissions.data', 1)
+        );
 });

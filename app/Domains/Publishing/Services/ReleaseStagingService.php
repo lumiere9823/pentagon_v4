@@ -18,6 +18,8 @@ use Throwable;
 
 class ReleaseStagingService
 {
+    public const RENDERER_VERSION = 2;
+
     protected PageSeoManager $seoManager;
 
     public function __construct(
@@ -44,7 +46,7 @@ class ReleaseStagingService
                 'release_number' => $nextNumber,
                 'status' => PageReleaseStatus::PENDING,
                 'schema_version' => 1,
-                'renderer_version' => 1,
+                'renderer_version' => self::RENDERER_VERSION,
                 'created_by' => $creator?->id,
             ]);
         });
@@ -152,7 +154,7 @@ class ReleaseStagingService
                 'page_revision_id' => (int) $revision->id,
                 'release_number' => (int) $release->release_number,
                 'schema_version' => 1,
-                'renderer_version' => 1,
+                'renderer_version' => self::RENDERER_VERSION,
                 'document_hash' => $docHash,
                 'html_bytes' => $fileBytes,
                 'html_hash' => $fileHash,

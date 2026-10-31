@@ -41,6 +41,14 @@ class WebsitePolicy
     }
 
     /**
+     * Determine whether the user can update or delete form submissions.
+     */
+    public function manageFormSubmissions(User $user, Website $website): bool
+    {
+        return $website->hasMember($user, [WebsiteRole::OWNER, WebsiteRole::EDITOR]);
+    }
+
+    /**
      * Determine whether the user can delete the model.
      */
     public function delete(User $user, Website $website): bool

@@ -200,6 +200,36 @@ class PagePublishingControllerTest extends TestCase
             ]);
     }
 
+    public function test_publish_rejects_empty_image_source_before_release_staging(): void
+    {
+        [$website, $page, $user] = $this->createSiteAndPage('owner');
+        $document = $this->createValidDocument();
+        $document['root']['children'][] = [
+            'id' => 'image_empty',
+            'type' => 'Image',
+            'props' => ['src' => '', 'alt' => 'Missing'],
+            'children' => [],
+        ];
+        $page->update(['document_json' => $document]);
+
+        $response = $this->actingAs($user)
+            ->postJson(route('websites.pages.publish', [
+                'website' => $website->id,
+                'page' => $page->id,
+            ]));
+
+        $response->assertStatus(422)
+            ->assertJson([
+                'success' => false,
+                'error' => 'validation_failed',
+                'details' => [[
+                    'path' => 'root.children[1].props.src',
+                    'code' => 'empty_image_source',
+                ]],
+            ]);
+        $this->assertDatabaseMissing('page_releases', ['page_id' => $page->id]);
+    }
+
     public function test_releases_index_returns_list_of_page_releases(): void
     {
         [$website, $page, $user] = $this->createSiteAndPage('owner');
@@ -219,6 +249,18 @@ class PagePublishingControllerTest extends TestCase
             ->assertJsonCount(2, 'releases')
             ->assertJsonPath('releases.0.release_number', 2)
             ->assertJsonPath('releases.1.release_number', 1);
+
+        // Limit parameter bounds the returned list
+        $limitResponse = $this->actingAs($user)
+            ->getJson(route('websites.pages.releases.index', [
+                'website' => $website->id,
+                'page' => $page->id,
+                'limit' => 1,
+            ]));
+
+        $limitResponse->assertOk()
+            ->assertJsonCount(1, 'releases')
+            ->assertJsonPath('releases.0.release_number', 2);
     }
 
     public function test_rollback_public_release_endpoint_succeeds(): void
@@ -263,6 +305,65 @@ class PagePublishingControllerTest extends TestCase
                 'page' => $page2->id,
                 'release' => $release1->id,
             ]));
+
+        $response->assertNotFound();
+    }
+
+    public function test_unpublish_transitions_published_page_to_draft_and_public_route_returns_404(): void
+    {
+        [$website, $page, $user] = $this->createSiteAndPage('owner');
+
+        // Publish page
+        $this->actingAs($user)
+            ->postJson(route('websites.pages.publish', ['website' => $website->id, 'page' => $page->id]))
+            ->assertOk();
+
+        // Verify public route is accessible
+        $this->get(route('public.sites.pages.show', ['website' => $website->slug, 'page' => $page->slug]))
+            ->assertOk();
+
+        $originalDocJson = $page->fresh()->document_json;
+        $originalRevisionsCount = $page->revisions()->count();
+
+        // Unpublish page
+        $response = $this->actingAs($user)
+            ->postJson(route('websites.pages.unpublish', ['website' => $website->id, 'page' => $page->id]));
+
+        $response->assertOk()
+            ->assertJson([
+                'success' => true,
+                'status' => 'draft',
+            ]);
+
+        $freshPage = $page->fresh();
+        $this->assertEquals('draft', $freshPage->status->value);
+
+        // Invariant: Draft document_json and revision history are NOT mutated by unpublishing
+        $this->assertEquals($originalDocJson, $freshPage->document_json);
+        $this->assertEquals($originalRevisionsCount, $freshPage->revisions()->count());
+
+        // Public route now returns 404
+        $this->get(route('public.sites.pages.show', ['website' => $website->slug, 'page' => $page->slug]))
+            ->assertNotFound();
+    }
+
+    public function test_unpublish_denies_viewer_role(): void
+    {
+        [$website, $page, $viewer] = $this->createSiteAndPage('viewer');
+
+        $response = $this->actingAs($viewer)
+            ->postJson(route('websites.pages.unpublish', ['website' => $website->id, 'page' => $page->id]));
+
+        $response->assertForbidden();
+    }
+
+    public function test_unpublish_aborts_with_404_on_cross_tenant_mismatch(): void
+    {
+        [$website1, $page1, $user] = $this->createSiteAndPage('owner');
+        $website2 = Website::factory()->create();
+
+        $response = $this->actingAs($user)
+            ->postJson(route('websites.pages.unpublish', ['website' => $website2->id, 'page' => $page1->id]));
 
         $response->assertNotFound();
     }

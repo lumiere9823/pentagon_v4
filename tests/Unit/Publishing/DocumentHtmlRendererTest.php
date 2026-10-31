@@ -55,6 +55,37 @@ class DocumentHtmlRendererTest extends TestCase
         $this->assertStringContainsString('<div id="node_divider_01"', $html);
     }
 
+    public function test_renders_registered_component_aliases_using_canonical_dispatch(): void
+    {
+        $document = $this->wrapInValidDocument([
+            'id' => 'alias_root',
+            'type' => 'Section',
+            'props' => [],
+            'children' => [
+                [
+                    'id' => 'alias_rich_text',
+                    'type' => 'Rich Text',
+                    'props' => ['content' => '<p>Alias content</p>'],
+                    'children' => [],
+                ],
+                [
+                    'id' => 'alias_card_grid',
+                    'type' => 'Card Grid',
+                    'props' => ['columns' => 2, 'gap' => 'small'],
+                    'children' => [],
+                ],
+            ],
+        ]);
+
+        $html = $this->renderer->render($document);
+        $previewHtml = $this->renderer->render($document, true);
+
+        $this->assertStringContainsString('<div id="alias_rich_text"', $html);
+        $this->assertStringContainsString('<p>Alias content</p>', $html);
+        $this->assertStringContainsString('<div id="alias_card_grid"', $html);
+        $this->assertSame($html, $previewHtml);
+    }
+
     /**
      * 2. Render từng component được registry hỗ trợ (Test cả 12 components).
      */
@@ -599,7 +630,7 @@ class DocumentHtmlRendererTest extends TestCase
         $this->assertMatchesRegularExpression('/<style>.+<\/style>\s*<\/head>/s', $fullDoc);
     }
 
-    public function test_responsive_display_classes_are_rendered_correctly(): void
+    public function test_responsive_visibility_uses_editor_cascade_at_public_breakpoints(): void
     {
         $doc = $this->wrapInValidDocument([
             'id' => 'sec_resp',
@@ -615,6 +646,7 @@ class DocumentHtmlRendererTest extends TestCase
                     'props' => ['label' => 'Mobile Only', 'url' => '#'],
                     'styles' => [
                         'tablet' => ['display' => 'hidden'],
+                        'mobile' => ['display' => 'visible'],
                     ],
                     'children' => [],
                 ],
@@ -623,9 +655,434 @@ class DocumentHtmlRendererTest extends TestCase
 
         $html = $this->renderer->render($doc);
 
-        // Section has mobile and tablet hidden -> hidden lg:block
-        $this->assertStringContainsString('hidden lg:block', $html);
-        // Button has tablet hidden -> inline-block md:hidden lg:inline-block
-        $this->assertStringContainsString('inline-block md:hidden lg:inline-block', $html);
+        $this->assertStringContainsString('[id="sec_resp"]{display:none;}', $html);
+        $this->assertMatchesRegularExpression('/@media \(min-width: 1024px\)\{\[id="sec_resp"\]\{display:block;\}/', $html);
+        $this->assertStringContainsString('[id="btn_resp"]{display:inline-block;}', $html);
+        $this->assertMatchesRegularExpression('/@media \(min-width: 768px\)\{.*\[id="btn_resp"\]\{display:none;\}/', $html);
+        $this->assertMatchesRegularExpression('/@media \(min-width: 1024px\)\{.*\[id="btn_resp"\]\{display:inline-block;\}/', $html);
+    }
+
+    public function test_responsive_supported_properties_render_as_real_css(): void
+    {
+        $doc = $this->wrapInValidDocument([
+            'id' => 'sec_styles',
+            'type' => 'Section',
+            'props' => ['padding' => 'small', 'background' => 'transparent'],
+            'styles' => [
+                'tablet' => ['padding' => 'large'],
+                'mobile' => ['padding' => 'none'],
+            ],
+            'children' => [
+                [
+                    'id' => 'heading_styles',
+                    'type' => 'Heading',
+                    'props' => ['text' => 'Responsive', 'level' => 2, 'align' => 'left'],
+                    'styles' => [
+                        'tablet' => ['align' => 'center'],
+                        'mobile' => ['align' => 'right'],
+                    ],
+                    'children' => [],
+                ],
+                [
+                    'id' => 'columns_styles',
+                    'type' => 'Columns',
+                    'props' => ['count' => 4, 'gap' => 'large'],
+                    'styles' => [
+                        'tablet' => ['count' => 3, 'gap' => 'medium'],
+                        'mobile' => ['count' => 2, 'gap' => 'small'],
+                    ],
+                    'children' => [],
+                ],
+            ],
+        ]);
+
+        $html = $this->renderer->render($doc);
+
+        $this->assertStringContainsString('[id="sec_styles"]{padding-block:0;}', $html);
+        $this->assertMatchesRegularExpression('/@media \(min-width: 768px\)\{\[id="sec_styles"\]\{padding-block:6rem;\}/', $html);
+        $this->assertMatchesRegularExpression('/@media \(min-width: 1024px\)\{\[id="sec_styles"\]\{padding-block:1.5rem;\}/', $html);
+        $this->assertStringContainsString('[id="heading_styles"]{text-align:right;}', $html);
+        $this->assertMatchesRegularExpression('/@media \(min-width: 768px\)\{.*\[id="heading_styles"\]\{text-align:center;\}/', $html);
+        $this->assertStringContainsString('[id="columns_styles"]{grid-template-columns:repeat(2,minmax(0,1fr));gap:0.75rem;}', $html);
+        $this->assertMatchesRegularExpression('/@media \(min-width: 1024px\)\{.*\[id="columns_styles"\]\{grid-template-columns:repeat\(4,minmax\(0,1fr\)\);gap:3rem;\}/', $html);
+    }
+
+    public function test_document_without_responsive_overrides_keeps_existing_markup_without_generated_css(): void
+    {
+        $doc = $this->wrapInValidDocument([
+            'id' => 'sec_plain',
+            'type' => 'Section',
+            'props' => ['padding' => 'medium', 'background' => 'transparent'],
+            'children' => [],
+        ]);
+
+        $html = $this->renderer->render($doc);
+
+        $this->assertStringNotContainsString('data-pb-responsive', $html);
+        $this->assertStringContainsString('py-8 sm:py-12', $html);
+    }
+
+    public function test_mobile_only_card_grid_override_preserves_natural_tablet_layout(): void
+    {
+        $doc = $this->wrapInValidDocument([
+            'id' => 'section_grid',
+            'type' => 'Section',
+            'children' => [[
+                'id' => 'cardgrid_mobile_only',
+                'type' => 'CardGrid',
+                'props' => ['columns' => 4, 'gap' => 'medium'],
+                'styles' => ['mobile' => ['columns' => 2]],
+                'children' => [],
+            ]],
+        ]);
+
+        $html = $this->renderer->render($doc);
+
+        $this->assertStringContainsString('[id="cardgrid_mobile_only"]{grid-template-columns:repeat(2,minmax(0,1fr));}', $html);
+        $this->assertMatchesRegularExpression('/@media \(min-width: 768px\)\{\[id="cardgrid_mobile_only"\]\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\);\}/', $html);
+        $this->assertMatchesRegularExpression('/@media \(min-width: 1024px\)\{\[id="cardgrid_mobile_only"\]\{grid-template-columns:repeat\(4,minmax\(0,1fr\)\);\}/', $html);
+    }
+
+    public function test_responsive_contract_emits_supported_rules_for_all_twelve_components(): void
+    {
+        $children = [
+            ['id' => 'container_all', 'type' => 'Container', 'props' => ['maxWidth' => 'lg', 'centered' => true], 'styles' => ['mobile' => ['maxWidth' => 'full', 'centered' => false]], 'children' => []],
+            ['id' => 'heading_all', 'type' => 'Heading', 'props' => ['text' => 'Heading', 'level' => 2, 'align' => 'left'], 'styles' => ['mobile' => ['align' => 'right']], 'children' => []],
+            ['id' => 'richtext_all', 'type' => 'RichText', 'props' => ['content' => '<p>Text</p>'], 'styles' => ['tablet' => ['display' => 'hidden']], 'children' => []],
+            ['id' => 'image_all', 'type' => 'Image', 'props' => ['src' => '/storage/media/1/photo.jpg', 'alt' => 'Photo', 'aspectRatio' => 'auto'], 'styles' => ['mobile' => ['aspectRatio' => '1:1']], 'children' => []],
+            ['id' => 'button_all', 'type' => 'Button', 'props' => ['label' => 'Go', 'url' => '#', 'size' => 'md', 'variant' => 'primary'], 'styles' => ['mobile' => ['size' => 'sm', 'variant' => 'outline']], 'children' => []],
+            ['id' => 'hero_all', 'type' => 'Hero', 'props' => ['title' => 'Hero', 'align' => 'center'], 'styles' => ['mobile' => ['align' => 'left']], 'children' => []],
+            ['id' => 'columns_all', 'type' => 'Columns', 'props' => ['count' => 4, 'gap' => 'large'], 'styles' => ['mobile' => ['count' => 2, 'gap' => 'small']], 'children' => []],
+            ['id' => 'cardgrid_all', 'type' => 'CardGrid', 'props' => ['columns' => 3, 'gap' => 'medium'], 'styles' => ['tablet' => ['columns' => 2, 'gap' => 'large']], 'children' => []],
+            ['id' => 'faq_all', 'type' => 'FAQ', 'props' => ['items' => []], 'styles' => ['mobile' => ['display' => 'hidden']], 'children' => []],
+            ['id' => 'spacer_all', 'type' => 'Spacer', 'props' => ['size' => 'medium'], 'styles' => ['mobile' => ['size' => 'xlarge']], 'children' => []],
+            ['id' => 'divider_all', 'type' => 'Divider', 'props' => ['style' => 'solid', 'color' => 'muted'], 'styles' => ['mobile' => ['style' => 'dashed', 'color' => 'primary']], 'children' => []],
+        ];
+        $doc = $this->wrapInValidDocument([
+            'id' => 'section_all',
+            'type' => 'Section',
+            'props' => ['padding' => 'medium', 'background' => 'transparent'],
+            'styles' => ['mobile' => ['padding' => 'small', 'background' => 'dark']],
+            'children' => $children,
+        ]);
+
+        $html = $this->renderer->render($doc);
+
+        foreach (['section_all', 'container_all', 'heading_all', 'richtext_all', 'image_all', 'button_all', 'hero_all', 'columns_all', 'cardgrid_all', 'faq_all', 'spacer_all', 'divider_all'] as $id) {
+            $this->assertStringContainsString('[id="'.$id.'"]', $html);
+        }
+        $this->assertStringContainsString('[id="image_all"] img{aspect-ratio:1;', $html);
+        $this->assertStringContainsString('[id="button_all"]>a{height:2rem;', $html);
+        $this->assertStringContainsString('[id="divider_all"]>hr{border-style:dashed;border-color:', $html);
+        $this->assertStringContainsString('@media (min-width: 768px)', $html);
+        $this->assertStringContainsString('@media (min-width: 1024px)', $html);
+    }
+
+    public function test_shared_text_primitives_render_consistently_and_responsively(): void
+    {
+        $doc = $this->wrapInValidDocument([
+            'id' => 'section_primitives',
+            'type' => 'Section',
+            'children' => [
+                [
+                    'id' => 'heading_primitives',
+                    'type' => 'Heading',
+                    'props' => [
+                        'text' => 'Styled heading',
+                        'level' => 2,
+                        'align' => 'right',
+                        'blockSpacing' => 'large',
+                        'maxWidth' => 'md',
+                        'fontSize' => 'large',
+                        'textColor' => 'primary',
+                    ],
+                    'styles' => [
+                        'tablet' => ['fontSize' => 'small', 'textColor' => 'muted'],
+                        'mobile' => ['blockSpacing' => 'none'],
+                    ],
+                    'children' => [],
+                ],
+                [
+                    'id' => 'rich_primitives',
+                    'type' => 'RichText',
+                    'props' => [
+                        'content' => '<p>Styled text</p>',
+                        'align' => 'right',
+                        'blockSpacing' => 'large',
+                        'maxWidth' => 'md',
+                        'fontSize' => 'large',
+                        'textColor' => 'primary',
+                    ],
+                    'children' => [],
+                ],
+            ],
+        ]);
+
+        $html = $this->renderer->render($doc);
+
+        $this->assertStringContainsString('class="my-6 leading-tight text-primary font-bold tracking-tight text-xl text-right max-w-screen-md"', $html);
+        $this->assertStringContainsString('class="prose max-w-screen-md my-6 leading-relaxed text-primary text-xl text-right"', $html);
+        $this->assertStringContainsString('[id="heading_primitives"]{font-size:0.875rem;color:var(--muted-foreground);margin-block:0;}', $html);
+        $this->assertStringContainsString('@media (min-width: 1024px){[id="heading_primitives"]{font-size:1.25rem;color:var(--primary);margin-block:1.5rem;}}', $html);
+    }
+
+    public function test_hero_background_sets_safe_foregrounds_for_every_bounded_value(): void
+    {
+        $expected = [
+            'transparent' => ['text-foreground', 'text-muted-foreground'],
+            'muted' => ['text-foreground', 'text-foreground'],
+            'primary' => ['text-foreground', 'text-foreground'],
+            'dark' => ['text-zinc-100', 'text-zinc-200'],
+        ];
+
+        foreach ($expected as $background => [$titleClass, $subtitleClass]) {
+            $doc = $this->wrapInValidDocument([
+                'id' => 'hero_'.$background,
+                'type' => 'Hero',
+                'props' => [
+                    'title' => 'Hero',
+                    'subtitle' => 'Subtitle',
+                    'align' => 'right',
+                    'background' => $background,
+                ],
+                'children' => [],
+            ]);
+
+            $html = $this->renderer->render($doc);
+
+            $this->assertMatchesRegularExpression('/<h1 class="[^"]*'.preg_quote($titleClass, '/').'[^"]*">Hero<\/h1>/', $html);
+            $this->assertMatchesRegularExpression('/<p class="[^"]*'.preg_quote($subtitleClass, '/').'[^"]*">Subtitle<\/p>/', $html);
+        }
+    }
+
+    public function test_hero_responsive_background_updates_child_foregrounds(): void
+    {
+        $doc = $this->wrapInValidDocument([
+            'id' => 'hero_responsive_background',
+            'type' => 'Hero',
+            'props' => [
+                'title' => 'Hero',
+                'subtitle' => 'Subtitle',
+                'background' => 'transparent',
+            ],
+            'styles' => [
+                'tablet' => ['background' => 'dark'],
+                'mobile' => ['background' => 'primary'],
+            ],
+            'children' => [],
+        ]);
+
+        $html = $this->renderer->render($doc);
+
+        $this->assertStringContainsString('[id="hero_responsive_background"]>h1{color:var(--foreground);}', $html);
+        $this->assertStringContainsString('[id="hero_responsive_background"]>p{color:var(--foreground);}', $html);
+        $this->assertStringContainsString('@media (min-width: 768px){[id="hero_responsive_background"]{background-color:var(--color-zinc-900,#18181b);color:var(--color-zinc-100,#f4f4f5);}[id="hero_responsive_background"]>h1{color:var(--color-zinc-100,#f4f4f5);}[id="hero_responsive_background"]>p{color:var(--color-zinc-200,#e4e4e7);}', $html);
+        $this->assertStringContainsString('@media (min-width: 1024px){[id="hero_responsive_background"]{background-color:transparent;color:var(--foreground);}[id="hero_responsive_background"]>h1{color:var(--foreground);}[id="hero_responsive_background"]>p{color:var(--muted-foreground);}}', $html);
+    }
+
+    public function test_directly_hidden_leaf_is_omitted_from_published_html(): void
+    {
+        $doc = $this->wrapInValidDocument([
+            'id' => 'sec_parent',
+            'type' => 'Section',
+            'children' => [
+                [
+                    'id' => 'heading_hidden',
+                    'type' => 'Heading',
+                    'props' => ['text' => 'Secret Title', 'level' => 2],
+                    'hidden' => true,
+                    'children' => [],
+                ],
+                [
+                    'id' => 'heading_visible',
+                    'type' => 'Heading',
+                    'props' => ['text' => 'Visible Title', 'level' => 2],
+                    'hidden' => false,
+                    'children' => [],
+                ],
+            ],
+        ]);
+
+        $html = $this->renderer->render($doc);
+
+        $this->assertStringNotContainsString('Secret Title', $html);
+        $this->assertStringNotContainsString('heading_hidden', $html);
+        $this->assertStringContainsString('Visible Title', $html);
+        $this->assertStringContainsString('heading_visible', $html);
+    }
+
+    public function test_hidden_container_and_all_descendants_are_omitted_from_published_html(): void
+    {
+        $doc = $this->wrapInValidDocument([
+            'id' => 'root_sec',
+            'type' => 'Section',
+            'children' => [
+                [
+                    'id' => 'container_hidden',
+                    'type' => 'Container',
+                    'hidden' => true,
+                    'children' => [
+                        [
+                            'id' => 'child_heading',
+                            'type' => 'Heading',
+                            'props' => ['text' => 'Deep Secret Heading', 'level' => 3],
+                            'children' => [],
+                        ],
+                        [
+                            'id' => 'child_btn',
+                            'type' => 'Button',
+                            'props' => ['label' => 'Secret Action', 'url' => 'https://example.com'],
+                            'children' => [],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $html = $this->renderer->render($doc);
+
+        $this->assertStringNotContainsString('container_hidden', $html);
+        $this->assertStringNotContainsString('Deep Secret Heading', $html);
+        $this->assertStringNotContainsString('child_heading', $html);
+        $this->assertStringNotContainsString('Secret Action', $html);
+        $this->assertStringNotContainsString('child_btn', $html);
+    }
+
+    public function test_explicitly_visible_descendant_inside_hidden_container_is_suppressed(): void
+    {
+        $doc = $this->wrapInValidDocument([
+            'id' => 'root_sec',
+            'type' => 'Section',
+            'children' => [
+                [
+                    'id' => 'parent_hidden',
+                    'type' => 'Container',
+                    'hidden' => true,
+                    'children' => [
+                        [
+                            'id' => 'explicitly_visible_child',
+                            'type' => 'Heading',
+                            'props' => ['text' => 'I claim to be visible', 'level' => 3],
+                            'hidden' => false,
+                            'children' => [],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $html = $this->renderer->render($doc);
+
+        $this->assertStringNotContainsString('parent_hidden', $html);
+        $this->assertStringNotContainsString('explicitly_visible_child', $html);
+        $this->assertStringNotContainsString('I claim to be visible', $html);
+    }
+
+    public function test_responsive_visibility_still_works_for_visible_nodes(): void
+    {
+        $doc = $this->wrapInValidDocument([
+            'id' => 'root_sec',
+            'type' => 'Section',
+            'children' => [
+                [
+                    'id' => 'btn_responsive',
+                    'type' => 'Button',
+                    'props' => ['label' => 'Responsive Button', 'url' => '#'],
+                    'styles' => [
+                        'mobile' => ['display' => 'hidden'],
+                    ],
+                    'children' => [],
+                ],
+            ],
+        ]);
+
+        $html = $this->renderer->render($doc);
+
+        $this->assertStringContainsString('Responsive Button', $html);
+        $this->assertStringContainsString('btn_responsive', $html);
+        $this->assertStringContainsString('[id="btn_responsive"]{display:none;}', $html);
+    }
+
+    public function test_hidden_content_is_completely_absent_not_merely_css_concealed(): void
+    {
+        $doc = $this->wrapInValidDocument([
+            'id' => 'root_sec',
+            'type' => 'Section',
+            'children' => [
+                [
+                    'id' => 'secret_container',
+                    'type' => 'Container',
+                    'hidden' => true,
+                    'children' => [
+                        [
+                            'id' => 'secret_text',
+                            'type' => 'RichText',
+                            'props' => ['content' => '<p>Confidential text</p>'],
+                            'children' => [],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $html = $this->renderer->render($doc);
+
+        $this->assertStringNotContainsString('secret_container', $html);
+        $this->assertStringNotContainsString('secret_text', $html);
+        $this->assertStringNotContainsString('Confidential text', $html);
+    }
+
+    public function test_rendering_does_not_mutate_the_stored_document(): void
+    {
+        $doc = $this->wrapInValidDocument([
+            'id' => 'root_sec',
+            'type' => 'Section',
+            'props' => ['padding' => 'medium', 'background' => 'transparent'],
+            'children' => [
+                [
+                    'id' => 'heading_node',
+                    'type' => 'Heading',
+                    'props' => ['text' => 'Immutable Heading', 'level' => 2],
+                    'locked' => true,
+                    'hidden' => false,
+                    'styles' => [
+                        'tablet' => ['align' => 'center'],
+                        'mobile' => ['display' => 'hidden'],
+                    ],
+                    'children' => [],
+                ],
+                [
+                    'id' => 'hidden_container',
+                    'type' => 'Container',
+                    'props' => ['maxWidth' => 'lg', 'centered' => true],
+                    'hidden' => true,
+                    'children' => [
+                        [
+                            'id' => 'btn_nested',
+                            'type' => 'Button',
+                            'props' => ['label' => 'Nested Button', 'url' => 'https://example.com'],
+                            'children' => [],
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $originalDoc = $doc;
+
+        // 1. renderFragment / render
+        $fragment = $this->renderer->render($doc);
+        $this->assertSame($originalDoc, $doc);
+        $this->assertNotEmpty($fragment);
+
+        // 2. renderDocument (standalone HTML5 wrapper with preview mode)
+        $previewHtml = $this->renderer->renderDocument($doc, ['title' => 'Sample Page'], true);
+        $this->assertSame($originalDoc, $doc);
+        $this->assertNotEmpty($previewHtml);
+
+        // 3. renderDocument (production mode)
+        $publishHtml = $this->renderer->renderDocument($doc, ['title' => 'Sample Page'], false);
+        $this->assertSame($originalDoc, $doc);
+        $this->assertNotEmpty($publishHtml);
     }
 }

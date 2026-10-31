@@ -13,6 +13,7 @@ use App\Models\MediaAsset;
 use App\Models\PageTemplate;
 use App\Models\Website;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -91,8 +92,15 @@ class PageTemplateController extends Controller
             ], 422);
         }
 
+        $canonicalDocument = $validationResult->getSanitizedDocument();
+        if ($canonicalDocument === null) {
+            return response()->json([
+                'message' => 'Template document could not be canonicalized.',
+            ], 422);
+        }
+
         // 2. Extract referenced media asset IDs and inspect ownership
-        $inspection = $scanner->inspectAssetReferences($document, $website);
+        $inspection = $scanner->inspectAssetReferences($canonicalDocument, $website);
         if ($inspection['indeterminate']) {
             return response()->json([
                 'message' => 'Template document media references cannot be scanned reliably.',
@@ -113,6 +121,7 @@ class PageTemplateController extends Controller
         return DB::transaction(function () use (
             $website,
             $validated,
+            $canonicalDocument,
             $newAssetIds,
             $lockService,
             $request
@@ -154,7 +163,7 @@ class PageTemplateController extends Controller
                 'description' => $validated['description'] ?? null,
                 'category' => $validated['category'] ?? 'general',
                 'schema_version' => 1,
-                'document_json' => $validated['document_json'],
+                'document_json' => $canonicalDocument,
                 'thumbnail_path' => $validated['thumbnail_path'] ?? null,
                 'is_active' => true,
                 'created_by' => $request->user()?->id,
@@ -201,6 +210,13 @@ class PageTemplateController extends Controller
                 return response()->json([
                     'message' => 'Template document failed Schema v1 validation.',
                     'errors' => array_map(fn ($e) => $e->toArray(), $validationResult->getErrors()),
+                ], 422);
+            }
+
+            $newDocument = $validationResult->getSanitizedDocument();
+            if ($newDocument === null) {
+                return response()->json([
+                    'message' => 'Template document could not be canonicalized.',
                 ], 422);
             }
 
@@ -329,7 +345,7 @@ class PageTemplateController extends Controller
     /**
      * Delete a custom website template.
      */
-    public function destroy(Request $request, Website $website, PageTemplate $template): JsonResponse
+    public function destroy(Request $request, Website $website, PageTemplate $template): JsonResponse|RedirectResponse
     {
         // Global starter templates are immutable
         if ($template->isGlobal()) {
@@ -356,9 +372,13 @@ class PageTemplateController extends Controller
             $lockedTemplate->delete();
         });
 
-        return response()->json([
-            'message' => 'Template deleted successfully.',
-        ], 200);
+        if ($request->wantsJson()) {
+            return response()->json([
+                'message' => 'Template deleted successfully.',
+            ], 200);
+        }
+
+        return redirect()->back()->with('success', 'Template deleted successfully.');
     }
 
     /**

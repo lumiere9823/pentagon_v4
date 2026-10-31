@@ -77,5 +77,6 @@ class HtmlSanitizerTest extends TestCase
         $this->assertFalse($this->sanitizer->isSafeUrl('data:text/html;base64,xxx'));
         $this->assertFalse($this->sanitizer->isSafeUrl('vbscript:msgbox(1)'));
         $this->assertFalse($this->sanitizer->isSafeUrl("https://example.com\x00/hidden"));
+        $this->assertFalse($this->sanitizer->isSafeUrl('http://example.com:bad'));
     }
 }

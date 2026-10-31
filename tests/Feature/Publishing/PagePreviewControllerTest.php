@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Publishing;
 
+use App\Domains\Publishing\Services\DocumentHtmlRenderer;
 use App\Models\Page;
 use App\Models\PageRevision;
 use App\Models\User;
@@ -83,8 +84,47 @@ class PagePreviewControllerTest extends TestCase
         $this->assertStringContainsString('noindex', (string) $response->headers->get('X-Robots-Tag'));
 
         $content = $response->getContent();
+        $this->assertStringStartsWith('<!DOCTYPE html>', $content);
         $this->assertStringContainsString('PREVIEW MODE', $content);
         $this->assertStringContainsString('Draft Heading', $content);
+        $this->assertGreaterThan(strpos($content, '<body class='), strpos($content, 'PREVIEW MODE'));
+
+        $publicHtml = app(DocumentHtmlRenderer::class)->renderDocument($page->document_json);
+        $this->assertStringStartsWith('<!DOCTYPE html>', $publicHtml);
+        $this->assertStringNotContainsString('PREVIEW MODE', $publicHtml);
+    }
+
+    public function test_preview_renders_aliases_with_the_same_canonical_sanitization_as_public_rendering(): void
+    {
+        [$website, $page, $user] = $this->createSiteAndPage();
+        $aliasDocument = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'preview_alias_root',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [[
+                    'id' => 'preview_alias_text',
+                    'type' => 'Rich Text',
+                    'props' => ['content' => '<p onclick="alert(1)">Canonical preview</p><script>alert(2)</script>'],
+                    'children' => [],
+                ]],
+            ],
+        ];
+        $page->update(['document_json' => $aliasDocument]);
+
+        $response = $this->actingAs($user)->get(route('websites.pages.preview.show', [$website, $page]));
+
+        $response->assertOk();
+        $previewHtml = $response->getContent();
+        $publicHtml = app(DocumentHtmlRenderer::class)->renderDocument($aliasDocument);
+        $this->assertStringContainsString('Canonical preview', $previewHtml);
+        $this->assertStringContainsString('Canonical preview', $publicHtml);
+        $this->assertStringNotContainsString('onclick', $previewHtml);
+        $this->assertStringNotContainsString('<script', $previewHtml);
+        $this->assertStringNotContainsString('preview-node-error', $previewHtml);
+        $this->assertStringNotContainsString('onclick', $publicHtml);
+        $this->assertStringNotContainsString('<script', $publicHtml);
     }
 
     public function test_authenticated_preview_can_render_historical_revision(): void
@@ -190,5 +230,84 @@ class PagePreviewControllerTest extends TestCase
 
         // Verify the generated URL is valid and accessible
         $this->get($signedUrl)->assertOk();
+    }
+
+    public function test_preview_strictly_omits_hidden_nodes_and_their_descendants(): void
+    {
+        $customDoc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec',
+                'type' => 'Section',
+                'props' => ['padding' => 'medium', 'background' => 'transparent'],
+                'children' => [
+                    [
+                        'id' => 'preview_visible_node',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Visible in Preview', 'level' => 1],
+                        'children' => [],
+                    ],
+                    [
+                        'id' => 'preview_hidden_leaf',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Hidden Secret in Preview', 'level' => 2],
+                        'hidden' => true,
+                        'children' => [],
+                    ],
+                    [
+                        'id' => 'preview_hidden_container',
+                        'type' => 'Container',
+                        'props' => ['maxWidth' => 'lg', 'centered' => true],
+                        'hidden' => true,
+                        'children' => [
+                            [
+                                'id' => 'preview_hidden_child_btn',
+                                'type' => 'Button',
+                                'props' => ['label' => 'Hidden Secret Button', 'url' => '#'],
+                                'children' => [],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+            'pageSettings' => [
+                'title' => 'Preview Page with Hidden Elements',
+                'description' => 'Test preview sanitization',
+            ],
+        ];
+
+        [$website, $page, $user] = $this->createSiteAndPage();
+        $page->update(['document_json' => $customDoc]);
+
+        // 1. Authenticated author preview route
+        $response = $this->actingAs($user)->get(route('websites.pages.preview.show', [
+            'website' => $website->id,
+            'page' => $page->id,
+        ]));
+
+        $response->assertOk();
+        $content = $response->getContent();
+
+        $this->assertStringContainsString('Visible in Preview', $content);
+        $this->assertStringContainsString('preview_visible_node', $content);
+
+        $this->assertStringNotContainsString('Hidden Secret in Preview', $content);
+        $this->assertStringNotContainsString('preview_hidden_leaf', $content);
+        $this->assertStringNotContainsString('preview_hidden_container', $content);
+        $this->assertStringNotContainsString('Hidden Secret Button', $content);
+        $this->assertStringNotContainsString('preview_hidden_child_btn', $content);
+
+        // 2. Signed public preview route
+        $signedUrl = URL::temporarySignedRoute('preview.signed', now()->addMinutes(30), [
+            'page' => $page->id,
+        ]);
+
+        $signedResponse = $this->get($signedUrl);
+        $signedResponse->assertOk();
+        $signedContent = $signedResponse->getContent();
+
+        $this->assertStringContainsString('Visible in Preview', $signedContent);
+        $this->assertStringNotContainsString('Hidden Secret in Preview', $signedContent);
+        $this->assertStringNotContainsString('Hidden Secret Button', $signedContent);
     }
 }

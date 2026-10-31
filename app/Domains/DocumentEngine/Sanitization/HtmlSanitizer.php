@@ -56,6 +56,10 @@ class HtmlSanitizer
 
         // Parse scheme
         $scheme = parse_url($trimmed, PHP_URL_SCHEME);
+        if ($scheme === false) {
+            return false;
+        }
+
         if ($scheme === null) {
             // Relative URL without leading slash
             return ! preg_match('/^[a-zA-Z0-9+.-]+:/i', $trimmed);

@@ -101,6 +101,33 @@ class ReleaseStagingTest extends TestCase
         $this->assertStringContainsString('<html lang="en">', $htmlContent);
     }
 
+    public function test_staging_legacy_alias_revision_renders_canonical_html_without_mutating_revision(): void
+    {
+        $legacyDocument = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'legacy_release_root',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [[
+                    'id' => 'legacy_release_text',
+                    'type' => 'Rich Text',
+                    'props' => ['content' => '<p onclick="alert(1)">Legacy release</p><script>alert(2)</script>'],
+                    'children' => [],
+                ]],
+            ],
+        ];
+        [, $revision, $user] = $this->createPageWithRevision($legacyDocument);
+
+        $release = $this->stagingService->stageRevision($revision, $user);
+
+        $html = Storage::disk('local')->get($release->directory_path.'/index.html');
+        $this->assertStringContainsString('Legacy release', $html);
+        $this->assertStringNotContainsString('onclick', $html);
+        $this->assertStringNotContainsString('alert(2)', $html);
+        $this->assertSame($legacyDocument, $revision->fresh()->document_json);
+    }
+
     /**
      * 3. Test manifest contains complete canonical metadata, artifacts, and hashes.
      */
@@ -118,7 +145,7 @@ class ReleaseStagingTest extends TestCase
         $this->assertEquals($revision->id, $manifest['page_revision_id']);
         $this->assertEquals(1, $manifest['release_number']);
         $this->assertEquals(1, $manifest['schema_version']);
-        $this->assertEquals(1, $manifest['renderer_version']);
+        $this->assertEquals(2, $manifest['renderer_version']);
         $this->assertEquals($revision->document_hash, $manifest['document_hash']);
         $this->assertArrayHasKey('created_at', $manifest);
         $this->assertArrayHasKey('html_bytes', $manifest);
@@ -459,5 +486,75 @@ class ReleaseStagingTest extends TestCase
         $this->assertEquals(PageReleaseStatus::PENDING, $release->status);
         $this->assertNotNull($release->directory_path);
         $this->assertTrue($this->manifestVerifier->verify($release));
+    }
+
+    /**
+     * 15. Test that staged release HTML completely omits hidden nodes and their subtrees from generated index.html.
+     */
+    public function test_staged_release_strictly_omits_hidden_nodes_and_their_descendants(): void
+    {
+        $customDoc = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'root_sec',
+                'type' => 'Section',
+                'props' => ['padding' => 'medium', 'background' => 'transparent'],
+                'children' => [
+                    [
+                        'id' => 'public_heading',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Publicly Published Title', 'level' => 1],
+                        'children' => [],
+                    ],
+                    [
+                        'id' => 'hidden_leaf',
+                        'type' => 'Heading',
+                        'props' => ['text' => 'Secret Unpublished Title', 'level' => 2],
+                        'hidden' => true,
+                        'children' => [],
+                    ],
+                    [
+                        'id' => 'hidden_container',
+                        'type' => 'Container',
+                        'props' => ['maxWidth' => 'lg', 'centered' => true],
+                        'hidden' => true,
+                        'children' => [
+                            [
+                                'id' => 'hidden_descendant_button',
+                                'type' => 'Button',
+                                'props' => ['label' => 'Secret Hidden Action', 'url' => 'https://example.com'],
+                                'children' => [],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+            'pageSettings' => [
+                'title' => 'Page with Hidden Content',
+                'description' => 'Verifying release sanitization',
+            ],
+        ];
+
+        [$page, $revision, $user] = $this->createPageWithRevision($customDoc);
+
+        $release = $this->stagingService->stageRevision($revision, $user);
+
+        $this->assertTrue($this->manifestVerifier->verify($release));
+
+        $indexPath = $release->directory_path.'/index.html';
+        $html = Storage::disk('local')->get($indexPath);
+
+        $this->assertNotNull($html);
+        $this->assertStringContainsString('Publicly Published Title', $html);
+        $this->assertStringContainsString('public_heading', $html);
+
+        // Hidden leaf must be completely absent from HTML
+        $this->assertStringNotContainsString('Secret Unpublished Title', $html);
+        $this->assertStringNotContainsString('hidden_leaf', $html);
+
+        // Hidden container and descendant must be completely absent from HTML
+        $this->assertStringNotContainsString('hidden_container', $html);
+        $this->assertStringNotContainsString('Secret Hidden Action', $html);
+        $this->assertStringNotContainsString('hidden_descendant_button', $html);
     }
 }

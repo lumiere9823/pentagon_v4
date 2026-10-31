@@ -2,6 +2,7 @@
 
 use App\Domains\Publishing\Exceptions\PublishFailedException;
 use App\Domains\Publishing\Exceptions\PublishRenderingException;
+use App\Domains\Publishing\Exceptions\PublishValidationException;
 use App\Domains\Publishing\Services\PagePublishingService;
 use App\Enums\PageReleaseStatus;
 use App\Enums\PageStatus;
@@ -84,7 +85,7 @@ test('active release is strictly preserved when subsequent publish fails validat
     try {
         $publishingService->publish($page, $user);
         $this->fail('Expected PublishFailedException was not thrown.');
-    } catch (PublishFailedException|PublishRenderingException $e) {
+    } catch (PublishFailedException|PublishRenderingException|PublishValidationException $e) {
         // Expected failure closed
     }
 

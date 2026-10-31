@@ -15,6 +15,12 @@ class ComponentRegistryApiTest extends TestCase
             ->assertJsonStructure([
                 'schemaVersion',
                 'components',
+                'stylePrimitives',
+                'aliases',
+                'responsive' => [
+                    'breakpoints' => ['tablet', 'desktop'],
+                    'overridableProps',
+                ],
                 'limits' => [
                     'maxPayloadBytes',
                     'maxTreeDepth',
@@ -24,6 +30,18 @@ class ComponentRegistryApiTest extends TestCase
             ])
             ->assertJson([
                 'schemaVersion' => 1,
+                'aliases' => [
+                    'Rich Text' => 'RichText',
+                    'Card Grid' => 'CardGrid',
+                ],
+                'responsive' => [
+                    'breakpoints' => ['tablet' => 768, 'desktop' => 1024],
+                    'overridableProps' => [
+                        'Heading' => ['align', 'blockSpacing', 'maxWidth', 'fontSize', 'textColor'],
+                        'Columns' => ['count', 'gap'],
+                        'RichText' => ['align', 'blockSpacing', 'maxWidth', 'fontSize', 'textColor'],
+                    ],
+                ],
                 'limits' => [
                     'maxPayloadBytes' => DocumentLimits::MAX_PAYLOAD_BYTES,
                     'maxTreeDepth' => DocumentLimits::MAX_TREE_DEPTH,

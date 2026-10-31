@@ -79,6 +79,31 @@ test('tenant viewers have read access but are forbidden from mutation operations
         'role' => 'viewer',
     ]);
     $page = Page::factory()->create(['website_id' => $website->id]);
+    $submission = FormSubmission::factory()->create([
+        'website_id' => $website->id,
+        'status' => 'new',
+    ]);
+
+    // Viewers retain read-only access to submissions
+    $this->actingAs($viewer)
+        ->getJson("/websites/{$website->id}/submissions")
+        ->assertOk();
+
+    // Viewers cannot mutate submissions
+    $this->actingAs($viewer)
+        ->patchJson("/websites/{$website->id}/submissions/{$submission->id}", [
+            'status' => 'read',
+        ])
+        ->assertForbidden();
+    $this->assertDatabaseHas('form_submissions', [
+        'id' => $submission->id,
+        'status' => 'new',
+    ]);
+
+    $this->actingAs($viewer)
+        ->deleteJson("/websites/{$website->id}/submissions/{$submission->id}")
+        ->assertForbidden();
+    $this->assertDatabaseHas('form_submissions', ['id' => $submission->id]);
 
     // Viewers cannot save content
     $this->actingAs($viewer)->putJson("/websites/{$website->id}/pages/{$page->id}/content", [
@@ -120,3 +145,35 @@ test('tenant editors can edit and publish pages but cannot alter memberships or 
         'role' => 'editor',
     ])->assertStatus(403);
 });
+
+test('tenant owners and editors can update and delete form submissions', function (string $role) {
+    $user = User::factory()->create();
+    $website = Website::factory()->create();
+    WebsiteMembership::factory()->create([
+        'website_id' => $website->id,
+        'user_id' => $user->id,
+        'role' => $role,
+    ]);
+    $submissionToUpdate = FormSubmission::factory()->create([
+        'website_id' => $website->id,
+        'status' => 'new',
+    ]);
+    $submissionToDelete = FormSubmission::factory()->create([
+        'website_id' => $website->id,
+    ]);
+
+    $this->actingAs($user)
+        ->patchJson("/websites/{$website->id}/submissions/{$submissionToUpdate->id}", [
+            'status' => 'read',
+        ])
+        ->assertOk();
+    $this->assertDatabaseHas('form_submissions', [
+        'id' => $submissionToUpdate->id,
+        'status' => 'read',
+    ]);
+
+    $this->actingAs($user)
+        ->deleteJson("/websites/{$website->id}/submissions/{$submissionToDelete->id}")
+        ->assertOk();
+    $this->assertDatabaseMissing('form_submissions', ['id' => $submissionToDelete->id]);
+})->with(['owner', 'editor']);

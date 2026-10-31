@@ -83,3 +83,52 @@ test('it applies custom SEO overrides and noindex directives', function () {
         ->and($metaString)->toContain('<meta property="og:image" content="https://example.com/banner.png">')
         ->and($metaString)->toContain('<meta name="twitter:image" content="https://example.com/banner.png">');
 });
+
+test('it formats custom structured data JSON-LD and securely escapes closing script tags (MQA-04)', function () {
+    $manager = new PageSeoManager;
+
+    $website = Website::factory()->create(['slug' => 'acme-corp']);
+    $page = Page::factory()->create([
+        'website_id' => $website->id,
+        'title' => 'Product Details',
+        'slug' => 'product-1',
+        'seo_metadata' => [
+            'schema_type' => 'Organization',
+            'structured_data_json' => [
+                '@context' => 'https://schema.org',
+                '@type' => 'Organization',
+                'name' => 'Acme </script><script>alert(1)</script>',
+                'url' => 'https://example.com',
+            ],
+        ],
+    ]);
+
+    $payload = $manager->buildSeoPayload($page, $website);
+    $metaString = implode("\n", $payload['meta_tags']);
+
+    expect($metaString)->toContain('<script type="application/ld+json">')
+        ->and($metaString)->not->toContain('</script><script>alert(1)</script>')
+        ->and($metaString)->toContain('\u003C/script\u003E');
+});
+
+test('it handles standalone nofollow directive and summary twitter card', function () {
+    $manager = new PageSeoManager;
+
+    $website = Website::factory()->create(['slug' => 'acme-corp']);
+    $page = Page::factory()->create([
+        'website_id' => $website->id,
+        'title' => 'Summary Page',
+        'slug' => 'summary',
+        'seo_metadata' => [
+            'noindex' => false,
+            'nofollow' => true,
+            'twitter_card' => 'summary',
+        ],
+    ]);
+
+    $payload = $manager->buildSeoPayload($page, $website);
+    $metaString = implode("\n", $payload['meta_tags']);
+
+    expect($metaString)->toContain('<meta name="robots" content="index, nofollow">')
+        ->and($metaString)->toContain('<meta name="twitter:card" content="summary">');
+});

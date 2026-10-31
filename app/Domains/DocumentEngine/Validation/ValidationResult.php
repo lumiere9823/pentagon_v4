@@ -14,6 +14,9 @@ final class ValidationResult
         private readonly ?array $sanitizedDocument = null,
     ) {}
 
+    /**
+     * @param  array<string, mixed>  $sanitizedDocument
+     */
     public static function success(array $sanitizedDocument): self
     {
         return new self(valid: true, errors: [], sanitizedDocument: $sanitizedDocument);

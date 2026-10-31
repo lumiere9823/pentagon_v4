@@ -173,6 +173,56 @@ class PageTemplateDomainAndApiTest extends TestCase
             ->assertJsonPath('data.description', 'Updated description.');
     }
 
+    public function test_template_store_and_update_persist_canonical_document_data(): void
+    {
+        [$website, $owner, $editor] = $this->createWebsiteWithMembers();
+        $storeDocument = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'template_alias_root',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [[
+                    'id' => 'template_alias_grid',
+                    'type' => 'Card Grid',
+                    'props' => [],
+                    'children' => [[
+                        'id' => 'template_alias_text',
+                        'type' => 'Rich Text',
+                        'props' => ['content' => '<p onclick="alert(1)">Template content</p><script>alert(2)</script>'],
+                        'children' => [],
+                    ]],
+                ]],
+            ],
+        ];
+
+        $storeResponse = $this->actingAs($owner)->postJson(route('websites.templates.store', $website), [
+            'name' => 'Canonical Template',
+            'document_json' => $storeDocument,
+        ]);
+
+        $storeResponse->assertCreated()
+            ->assertJsonPath('data.document_json.root.children.0.type', 'CardGrid')
+            ->assertJsonPath('data.document_json.root.children.0.children.0.type', 'RichText');
+        $template = PageTemplate::findOrFail($storeResponse->json('data.id'));
+        $this->assertSame(['columns' => 3, 'gap' => 'medium'], $template->document_json['root']['children'][0]['props']);
+        $this->assertStringNotContainsString('onclick', $template->document_json['root']['children'][0]['children'][0]['props']['content']);
+        $this->assertStringNotContainsString('<script', $template->document_json['root']['children'][0]['children'][0]['props']['content']);
+
+        $updateDocument = $storeDocument;
+        $updateDocument['root']['children'][0]['children'][0]['props']['content'] = '<p>Updated <strong>content</strong></p><script>alert(3)</script>';
+        $updateResponse = $this->actingAs($editor)->putJson(route('websites.templates.update', [$website, $template]), [
+            'document_json' => $updateDocument,
+        ]);
+
+        $updateResponse->assertOk()
+            ->assertJsonPath('data.document_json.root.children.0.type', 'CardGrid')
+            ->assertJsonPath('data.document_json.root.children.0.children.0.type', 'RichText');
+        $updatedContent = $template->fresh()->document_json['root']['children'][0]['children'][0]['props']['content'];
+        $this->assertStringContainsString('<strong>content</strong>', $updatedContent);
+        $this->assertStringNotContainsString('<script', $updatedContent);
+    }
+
     public function test_global_templates_are_strictly_immutable(): void
     {
         [$website, $owner, $editor] = $this->createWebsiteWithMembers();
@@ -332,6 +382,35 @@ class PageTemplateDomainAndApiTest extends TestCase
         // 4. Source template document remains unmutated
         $template->refresh();
         $this->assertEquals($rootIdOriginal, $template->document_json['root']['id']);
+    }
+
+    public function test_template_instantiation_returns_canonical_copy_of_legacy_alias_template(): void
+    {
+        $legacyDocument = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'legacy_template_root',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [[
+                    'id' => 'legacy_template_text',
+                    'type' => 'Rich Text',
+                    'props' => ['content' => '<p onclick="alert(1)">Legacy template</p>'],
+                    'children' => [],
+                ]],
+            ],
+        ];
+        $template = PageTemplate::factory()->global()->create([
+            'document_json' => $legacyDocument,
+        ]);
+
+        $document = app(TemplateInstantiationService::class)->instantiate($template, 'Canonical Page');
+
+        $this->assertSame('RichText', $document['root']['children'][0]['type']);
+        $this->assertStringContainsString('Legacy template', $document['root']['children'][0]['props']['content']);
+        $this->assertStringNotContainsString('onclick', $document['root']['children'][0]['props']['content']);
+        $this->assertSame('Canonical Page', $document['pageSettings']['title']);
+        $this->assertSame($legacyDocument, $template->fresh()->document_json);
     }
 
     public function test_page_create_and_builder_flow_with_template(): void

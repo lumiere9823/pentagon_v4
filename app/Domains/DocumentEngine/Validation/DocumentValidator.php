@@ -183,6 +183,53 @@ class DocumentValidator
     }
 
     /**
+     * Apply publish-only semantic checks while preserving draft/preview placeholders.
+     *
+     * @param  string|array<string, mixed>  $payload
+     */
+    public function validateForPublishing(string|array $payload): ValidationResult
+    {
+        $result = $this->validate($payload);
+        if (! $result->isValid()) {
+            return $result;
+        }
+
+        $document = $result->getSanitizedDocument();
+        if ($document === null || ! isset($document['root']) || ! is_array($document['root'])) {
+            return $result;
+        }
+
+        $errors = [];
+        $this->collectPublishErrors($document['root'], 'root', $errors);
+
+        return $errors === [] ? $result : ValidationResult::failure($errors);
+    }
+
+    /**
+     * @param  array<string, mixed>  $node
+     * @param  list<ValidationError>  $errors
+     */
+    private function collectPublishErrors(array $node, string $path, array &$errors): void
+    {
+        if (($node['type'] ?? null) === 'Image') {
+            $src = $node['props']['src'] ?? null;
+            if (! is_string($src) || trim($src) === '') {
+                $errors[] = new ValidationError(
+                    path: "{$path}.props.src",
+                    code: 'empty_image_source',
+                    message: 'Image source is required before publishing. Choose an image or enter a safe URL.'
+                );
+            }
+        }
+
+        foreach ($node['children'] ?? [] as $index => $child) {
+            if (is_array($child)) {
+                $this->collectPublishErrors($child, "{$path}.children[{$index}]", $errors);
+            }
+        }
+    }
+
+    /**
      * @param  array<string, mixed>  $node
      * @param  array<string, bool>  $seenNodeIds
      * @param  list<ValidationError>  $errors
@@ -357,6 +404,62 @@ class DocumentValidator
 
         if ($sanitizedStyles !== null && ! empty($sanitizedStyles)) {
             $nodeResult['styles'] = $sanitizedStyles;
+        }
+
+        if (array_key_exists('locked', $node)) {
+            if (! is_bool($node['locked'])) {
+                $errors[] = new ValidationError(
+                    path: "{$path}.locked",
+                    code: 'invalid_locked_type',
+                    message: "Property 'locked' for node at '{$path}' must be a boolean."
+                );
+            } elseif ($node['locked'] === true) {
+                $nodeResult['locked'] = true;
+            }
+        }
+
+        if (array_key_exists('hidden', $node)) {
+            if (! is_bool($node['hidden'])) {
+                $errors[] = new ValidationError(
+                    path: "{$path}.hidden",
+                    code: 'invalid_hidden_type',
+                    message: "Property 'hidden' for node at '{$path}' must be a boolean."
+                );
+            } elseif ($path === 'root' && $node['hidden'] === true) {
+                $errors[] = new ValidationError(
+                    path: 'root.hidden',
+                    code: 'root_cannot_be_hidden',
+                    message: 'The root node cannot be globally hidden.'
+                );
+            } else {
+                $nodeResult['hidden'] = $node['hidden'];
+            }
+        }
+
+        if (array_key_exists('label', $node)) {
+            if ($node['label'] !== null && ! is_string($node['label'])) {
+                $errors[] = new ValidationError(
+                    path: "{$path}.label",
+                    code: 'invalid_label_type',
+                    message: "Property 'label' for node at '{$path}' must be a string or null."
+                );
+            } else {
+                $trimmedLabel = is_string($node['label']) ? trim($node['label']) : '';
+                if ($trimmedLabel !== '') {
+                    if (mb_strlen($trimmedLabel) > DocumentLimits::MAX_LABEL_LENGTH) {
+                        $errors[] = new ValidationError(
+                            path: "{$path}.label",
+                            code: 'label_too_long',
+                            message: 'Node label cannot exceed '.DocumentLimits::MAX_LABEL_LENGTH.' characters.'
+                        );
+                    } else {
+                        $cleanLabel = strip_tags($trimmedLabel);
+                        if ($cleanLabel !== '') {
+                            $nodeResult['label'] = $cleanLabel;
+                        }
+                    }
+                }
+            }
         }
 
         return $nodeResult;

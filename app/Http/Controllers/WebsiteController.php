@@ -6,7 +6,9 @@ use App\Enums\WebsiteRole;
 use App\Http\Requests\StoreWebsiteRequest;
 use App\Http\Requests\UpdateWebsiteRequest;
 use App\Models\Page;
+use App\Models\PageTemplate;
 use App\Models\Website;
+use Illuminate\Database\Eloquent\Relations\Pivot;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -24,13 +26,15 @@ class WebsiteController extends Controller
             ->orderByPivot('created_at', 'desc')
             ->get()
             ->map(function (Website $website) use ($user) {
+                $pivot = $website->getRelation('pivot');
+
                 return [
                     'id' => $website->id,
                     'name' => $website->name,
                     'slug' => $website->slug,
                     'status' => $website->status,
                     'pages_count' => $website->pages_count,
-                    'role' => $website->pivot?->role,
+                    'role' => $pivot instanceof Pivot ? $pivot->getAttribute('role') : null,
                     'is_owner' => $website->owner_id === $user->id,
                     'created_at' => $website->created_at?->toIso8601String(),
                 ];
@@ -112,6 +116,23 @@ class WebsiteController extends Controller
                 ];
             });
 
+        $templates = $website->templates()
+            ->with('creator:id,name')
+            ->orderBy('created_at', 'desc')
+            ->get()
+            ->map(function ($template) {
+                return [
+                    'id' => $template->id,
+                    'name' => $template->name,
+                    'slug' => $template->slug,
+                    'category' => $template->category,
+                    'description' => $template->description,
+                    'is_active' => $template->is_active,
+                    'created_at' => $template->created_at?->toIso8601String(),
+                    'creator' => $template->creator?->only(['id', 'name']),
+                ];
+            });
+
         return Inertia::render('Websites/Show', [
             'website' => [
                 'id' => $website->id,
@@ -122,12 +143,14 @@ class WebsiteController extends Controller
             ],
             'pages' => $pages,
             'memberships' => $memberships,
+            'templates' => $templates,
             'userRole' => $userRole?->value,
             'can' => [
                 'update' => $user->can('update', $website),
                 'delete' => $user->can('delete', $website),
                 'create_page' => $user->can('create', [Page::class, $website]),
                 'manage_members' => $userRole === WebsiteRole::OWNER,
+                'manage_templates' => $user->can('create', [PageTemplate::class, $website]),
             ],
         ]);
     }

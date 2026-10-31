@@ -263,6 +263,12 @@ class PageRevisionTest extends TestCase
                     'document_json' => $doc1,
                 ],
             ]);
+
+        // Limit parameter bounds the returned list
+        $limitResponse = $this->actingAs($viewer)->getJson(route('websites.pages.revisions.index', [$website, $page, 'limit' => 1]));
+        $limitResponse->assertOk()
+            ->assertJsonCount(1, 'revisions')
+            ->assertJsonPath('revisions.0.revision_number', 2);
     }
 
     public function test_rollback_creates_sequential_n_plus_one_revision_and_updates_page(): void
@@ -327,6 +333,53 @@ class PageRevisionTest extends TestCase
             'revision_number' => 3,
             'change_summary' => 'Restored from Revision #1',
         ]);
+    }
+
+    public function test_rollback_canonicalizes_restored_copy_without_mutating_historical_revision(): void
+    {
+        $owner = User::factory()->create();
+        [$website, $page] = $this->createWebsiteWithPage($owner, null, 3);
+        $historicalDocument = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'historical_alias_root',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [[
+                    'id' => 'historical_alias_text',
+                    'type' => 'Rich Text',
+                    'props' => ['content' => '<p onclick="alert(1)">Historical content</p><script>alert(2)</script>'],
+                    'children' => [],
+                ]],
+            ],
+        ];
+        $targetRevision = PageRevision::create([
+            'page_id' => $page->id,
+            'revision_number' => 1,
+            'schema_version' => 1,
+            'document_json' => $historicalDocument,
+            'document_hash' => PageRevision::canonicalizeDocument($historicalDocument),
+            'change_summary' => 'Legacy alias revision',
+            'is_autosave' => false,
+            'created_by' => $owner->id,
+            'created_at' => now()->subMinutes(10),
+        ]);
+
+        $response = $this->actingAs($owner)->postJson(route('websites.pages.revisions.rollback', [$website, $page, $targetRevision]));
+
+        $response->assertOk()->assertJsonPath('revision_number', 2);
+        $targetRevision->refresh();
+        $this->assertSame($historicalDocument, $targetRevision->document_json);
+
+        $restoredDocument = $page->fresh()->document_json;
+        $this->assertSame('RichText', $restoredDocument['root']['children'][0]['type']);
+        $this->assertStringContainsString('Historical content', $restoredDocument['root']['children'][0]['props']['content']);
+        $this->assertStringNotContainsString('onclick', $restoredDocument['root']['children'][0]['props']['content']);
+        $this->assertStringNotContainsString('<script', $restoredDocument['root']['children'][0]['props']['content']);
+
+        $restoredRevision = PageRevision::where('page_id', $page->id)->where('revision_number', 2)->sole();
+        $this->assertSame($restoredDocument, $restoredRevision->document_json);
+        $this->assertSame(PageRevision::canonicalizeDocument($restoredDocument), $restoredRevision->document_hash);
     }
 
     public function test_viewer_cannot_rollback_revision(): void

@@ -50,6 +50,13 @@ class DocumentHtmlRenderer
 
     private static ?string $inlineStylesheetCache = null;
 
+    /** @var array{mobile: array<string, list<string>>, tablet: array<string, list<string>>, desktop: array<string, list<string>>} */
+    private array $responsiveRules = [
+        'mobile' => [],
+        'tablet' => [],
+        'desktop' => [],
+    ];
+
     public function __construct(
         ?DocumentValidator $validator = null,
         ?HtmlSanitizer $sanitizer = null,
@@ -70,8 +77,22 @@ class DocumentHtmlRenderer
      */
     public function render(array|string $document, bool $previewMode = false): string
     {
+        $this->resetResponsiveRules();
+        $rendered = $this->renderFragment($document, $previewMode);
+
+        return $this->responsiveStyleBlock().$rendered['html'];
+    }
+
+    /**
+     * @param  array<string, mixed>|string  $document
+     * @return array{document: array<string, mixed>, html: string}
+     */
+    private function renderFragment(array|string $document, bool $previewMode): array
+    {
         // 1. Authoritative Document Schema v1 validation
-        $validationResult = $this->validator->validate($document);
+        $validationResult = $previewMode
+            ? $this->validator->validate($document)
+            : $this->validator->validateForPublishing($document);
         if (! $validationResult->isValid()) {
             $formattedErrors = array_map(fn ($e) => $e->toArray(), $validationResult->getErrors());
             $errorSummary = implode('; ', array_map(fn ($e) => "[{$e->getPath()}] {$e->getMessage()}", $validationResult->getErrors()));
@@ -82,13 +103,15 @@ class DocumentHtmlRenderer
             );
         }
 
-        $decoded = is_string($document) ? json_decode($document, true) : $document;
-        /** @var array<string, mixed> $decoded */
-        if (! isset($decoded['root']) || ! is_array($decoded['root'])) {
+        $canonicalDocument = $validationResult->getSanitizedDocument();
+        if ($canonicalDocument === null || ! isset($canonicalDocument['root']) || ! is_array($canonicalDocument['root'])) {
             throw new PublishRenderingException('Document root node is missing or invalid.');
         }
 
-        return $this->renderNode($decoded['root'], 1, $previewMode);
+        return [
+            'document' => $canonicalDocument,
+            'html' => $this->renderNode($canonicalDocument['root'], 1, $previewMode),
+        ];
     }
 
     /**
@@ -103,13 +126,18 @@ class DocumentHtmlRenderer
      *     meta_tags?: list<string>
      * }  $meta
      */
-    public function renderDocument(array|string $document, array $meta = [], bool $previewMode = false): string
-    {
-        $renderedFragment = $this->render($document, $previewMode);
+    public function renderDocument(
+        array|string $document,
+        array $meta = [],
+        bool $previewMode = false,
+        string $bodyPrefixHtml = '',
+    ): string {
+        $this->resetResponsiveRules();
+        $rendered = $this->renderFragment($document, $previewMode);
+        $renderedFragment = $rendered['html'];
 
-        $decoded = is_string($document) ? json_decode($document, true) : $document;
-        $pageSettings = is_array($decoded) && isset($decoded['pageSettings']) && is_array($decoded['pageSettings'])
-            ? $decoded['pageSettings']
+        $pageSettings = isset($rendered['document']['pageSettings']) && is_array($rendered['document']['pageSettings'])
+            ? $rendered['document']['pageSettings']
             : [];
 
         $title = $meta['title'] ?? ($pageSettings['title'] ?? 'Published Page');
@@ -132,6 +160,8 @@ class DocumentHtmlRenderer
             }
         }
         $metaBlock = ! empty($metaHeaders) ? "\n    ".implode("\n    ", $metaHeaders) : '';
+        $responsiveStyleBlock = $this->responsiveStyleBlock();
+        $bodyPrefix = $bodyPrefixHtml !== '' ? "\n    {$bodyPrefixHtml}" : '';
 
         return <<<HTML
 <!DOCTYPE html>
@@ -142,8 +172,9 @@ class DocumentHtmlRenderer
     <title>{$escapedTitle}</title>
     <meta name="description" content="{$escapedDescription}">{$metaBlock}
     {$stylesheetBlock}
+    {$responsiveStyleBlock}
 </head>
-<body class="min-h-screen bg-white text-gray-900 antialiased">
+<body class="min-h-screen bg-white text-gray-900 antialiased">{$bodyPrefix}
     {$renderedFragment}
 </body>
 </html>
@@ -189,6 +220,10 @@ HTML;
      */
     private function renderNode(array $node, int $depth, bool $previewMode): string
     {
+        if (($node['hidden'] ?? false) === true) {
+            return '';
+        }
+
         if ($depth > DocumentLimits::MAX_TREE_DEPTH) {
             throw new PublishRenderingException('Maximum document tree depth limit of '.DocumentLimits::MAX_TREE_DEPTH." exceeded at node '{$node['id']}'.");
         }
@@ -206,6 +241,8 @@ HTML;
                 throw new PublishRenderingException("Component definition for '{$type}' not found.");
             }
 
+            $responsiveClasses = $this->resolveResponsiveClasses($node);
+
             // Render children if allowed
             $childrenHtml = '';
             if ($definition->allowChildren && isset($node['children']) && is_array($node['children'])) {
@@ -215,8 +252,6 @@ HTML;
                     }
                 }
             }
-
-            $responsiveClasses = $this->resolveResponsiveClasses($node);
 
             return match ($type) {
                 'Section' => $this->renderSection($node, $childrenHtml, $responsiveClasses),
@@ -322,13 +357,21 @@ HTML;
         $level = max(1, min(6, $rawLevel));
         $tag = "h{$level}";
 
-        $sizeClass = match ($level) {
-            1 => 'text-3xl sm:text-4xl font-extrabold tracking-tight',
-            2 => 'text-2xl sm:text-3xl font-bold tracking-tight',
-            3 => 'text-xl sm:text-2xl font-bold',
-            4 => 'text-lg sm:text-xl font-semibold',
-            5 => 'text-base sm:text-lg font-medium',
-            default => 'text-sm sm:text-base font-medium',
+        $fontSize = (string) ($props['fontSize'] ?? 'semantic');
+        $sizeClass = $fontSize === 'semantic'
+            ? match ($level) {
+                1 => 'text-3xl sm:text-4xl font-extrabold tracking-tight',
+                2 => 'text-2xl sm:text-3xl font-bold tracking-tight',
+                3 => 'text-xl sm:text-2xl font-bold',
+                4 => 'text-lg sm:text-xl font-semibold',
+                5 => 'text-base sm:text-lg font-medium',
+                default => 'text-sm sm:text-base font-medium',
+            }
+        : match ($level) {
+            1 => 'font-extrabold tracking-tight',
+            2, 3 => 'font-bold tracking-tight',
+            4 => 'font-semibold',
+            default => 'font-medium',
         };
 
         $align = $props['align'] ?? 'left';
@@ -338,8 +381,22 @@ HTML;
             default => 'text-left',
         };
 
+        $blockSpacingClass = $this->blockSpacingClass((string) ($props['blockSpacing'] ?? 'small'));
+        $maxWidthClass = $this->maxWidthClass((string) ($props['maxWidth'] ?? 'full'));
+        $fontSizeClass = $this->fontSizeClass($fontSize);
+        $textColorClass = $this->textColorClass((string) ($props['textColor'] ?? 'foreground'), 'text-foreground');
+
         $text = $this->escape((string) ($props['text'] ?? 'Heading'));
-        $classes = trim("my-2 leading-tight text-foreground {$sizeClass} {$alignClass} {$responsiveClasses}");
+        $classes = implode(' ', array_filter([
+            $blockSpacingClass,
+            'leading-tight',
+            $textColorClass,
+            $sizeClass,
+            $fontSizeClass,
+            $alignClass,
+            $maxWidthClass,
+            $responsiveClasses,
+        ]));
 
         return "<{$tag} id=\"{$id}\" class=\"{$classes}\">{$text}</{$tag}>";
     }
@@ -358,7 +415,26 @@ HTML;
         // Strict allowlisted HTML sanitization (strips all scripts, event handlers, javascript: URIs)
         $sanitizedContent = $this->sanitizer->sanitize($rawContent);
 
-        $classes = trim("prose max-w-none my-2 leading-relaxed text-foreground/90 {$responsiveClasses}");
+        $alignClass = match ($props['align'] ?? 'left') {
+            'center' => 'text-center',
+            'right' => 'text-right',
+            default => '',
+        };
+        $blockSpacingClass = $this->blockSpacingClass((string) ($props['blockSpacing'] ?? 'small'));
+        $maxWidthClass = $this->maxWidthClass((string) ($props['maxWidth'] ?? 'full'), 'max-w-none');
+        $fontSizeClass = $this->fontSizeClass((string) ($props['fontSize'] ?? 'semantic'));
+        $textColorClass = $this->textColorClass((string) ($props['textColor'] ?? 'soft'), 'text-foreground/90');
+
+        $classes = implode(' ', array_filter([
+            'prose',
+            $maxWidthClass,
+            $blockSpacingClass,
+            'leading-relaxed',
+            $textColorClass,
+            $fontSizeClass,
+            $alignClass,
+            $responsiveClasses,
+        ]));
 
         return "<div id=\"{$id}\" class=\"{$classes}\">{$sanitizedContent}</div>";
     }
@@ -461,13 +537,19 @@ HTML;
         $props = $node['props'] ?? [];
 
         $align = $props['align'] ?? 'center';
-        $alignClass = $align === 'left' ? 'text-left items-start' : 'text-center items-center';
+        $alignClass = match ($align) {
+            'left' => 'text-left items-start',
+            'right' => 'text-right items-end',
+            default => 'text-center items-center',
+        };
+        $backgroundClass = $this->backgroundClass((string) ($props['background'] ?? 'transparent'));
+        [$titleForegroundClass, $subtitleForegroundClass] = $this->heroForegroundClasses((string) ($props['background'] ?? 'transparent'));
 
         $title = $this->escape((string) ($props['title'] ?? 'Hero Headline'));
         $subtitle = (string) ($props['subtitle'] ?? '');
         $subtitleHtml = '';
         if ($subtitle !== '') {
-            $subtitleHtml = '<p class="mt-4 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">'.$this->escape($subtitle).'</p>';
+            $subtitleHtml = '<p class="mt-4 max-w-2xl text-base leading-relaxed sm:text-lg '.$subtitleForegroundClass.'">'.$this->escape($subtitle).'</p>';
         }
 
         $ctaText = (string) ($props['ctaText'] ?? '');
@@ -482,9 +564,14 @@ HTML;
         }
 
         $slotHtml = $childrenHtml !== '' ? "<div class=\"mt-6 w-full\">{$childrenHtml}</div>" : '';
-        $classes = trim("flex w-full flex-col justify-center px-4 py-12 sm:px-6 sm:py-20 {$alignClass} {$responsiveClasses}");
+        $classes = implode(' ', array_filter([
+            'flex w-full flex-col justify-center px-4 py-12 sm:px-6 sm:py-20',
+            $alignClass,
+            $backgroundClass,
+            $responsiveClasses,
+        ]));
 
-        return "<div id=\"{$id}\" class=\"{$classes}\"><h1 class=\"max-w-3xl text-3xl leading-tight font-extrabold tracking-tight text-foreground sm:text-5xl\">{$title}</h1>{$subtitleHtml}{$ctaHtml}{$slotHtml}</div>";
+        return "<div id=\"{$id}\" class=\"{$classes}\"><h1 class=\"max-w-3xl text-3xl leading-tight font-extrabold tracking-tight sm:text-5xl {$titleForegroundClass}\">{$title}</h1>{$subtitleHtml}{$ctaHtml}{$slotHtml}</div>";
     }
 
     /**
@@ -639,35 +726,443 @@ HTML;
     }
 
     /**
-     * Resolve responsive visibility classes from node styles.
+     * Register allowlisted responsive rules and leave existing desktop classes unchanged.
      *
      * @param  array<string, mixed>  $node
      */
     private function resolveResponsiveClasses(array $node): string
     {
-        $type = (string) ($node['type'] ?? '');
         $styles = isset($node['styles']) && is_array($node['styles']) ? $node['styles'] : [];
-
-        if (empty($styles)) {
+        if ($styles === []) {
             return '';
         }
 
-        $intrinsic = self::INTRINSIC_DISPLAY_MODES[$type] ?? 'block';
-
-        $mobileDisplay = $styles['mobile']['display'] ?? null;
-        $tabletDisplay = $styles['tablet']['display'] ?? null;
-
-        $classes = [];
-
-        if ($mobileDisplay === 'hidden' && $tabletDisplay === 'hidden') {
-            $classes[] = "hidden lg:{$intrinsic}";
-        } elseif ($mobileDisplay === 'hidden') {
-            $classes[] = "hidden md:{$intrinsic}";
-        } elseif ($tabletDisplay === 'hidden') {
-            $classes[] = "{$intrinsic} md:hidden lg:{$intrinsic}";
+        $type = (string) ($node['type'] ?? '');
+        $id = (string) ($node['id'] ?? '');
+        $props = isset($node['props']) && is_array($node['props']) ? $node['props'] : [];
+        $definition = $this->registry->get($type);
+        if ($definition === null) {
+            return '';
         }
 
-        return implode(' ', $classes);
+        $keys = [];
+        foreach (['tablet', 'mobile'] as $viewport) {
+            foreach (array_keys(is_array($styles[$viewport] ?? null) ? $styles[$viewport] : []) as $key) {
+                if (is_string($key) && $this->registry->isResponsiveOverrideAllowed($type, $key)) {
+                    $keys[$key] = true;
+                }
+            }
+        }
+
+        foreach (array_keys($keys) as $prop) {
+            $baseValue = $prop === 'display'
+                ? 'visible'
+                : ($props[$prop] ?? ($definition->propSchemas[$prop]['default'] ?? null));
+            $tabletValue = $styles['tablet'][$prop] ?? $baseValue;
+            $mobileValue = $styles['mobile'][$prop] ?? $tabletValue;
+
+            $mobileUsesNaturalLayout = in_array($prop, ['count', 'columns'], true)
+                && ! array_key_exists($prop, is_array($styles['mobile'] ?? null) ? $styles['mobile'] : [])
+                && ! array_key_exists($prop, is_array($styles['tablet'] ?? null) ? $styles['tablet'] : []);
+            $tabletUsesNaturalLayout = in_array($prop, ['count', 'columns'], true)
+                && ! array_key_exists($prop, is_array($styles['tablet'] ?? null) ? $styles['tablet'] : []);
+
+            $this->registerResponsiveDeclaration($id, $type, $prop, $mobileValue, 'mobile', $props, $mobileUsesNaturalLayout);
+            $this->registerResponsiveDeclaration($id, $type, $prop, $tabletValue, 'tablet', $props, $tabletUsesNaturalLayout);
+            $this->registerResponsiveDeclaration($id, $type, $prop, $baseValue, 'desktop', $props);
+        }
+
+        return '';
+    }
+
+    private function resetResponsiveRules(): void
+    {
+        $this->responsiveRules = [
+            'mobile' => [],
+            'tablet' => [],
+            'desktop' => [],
+        ];
+    }
+
+    private function responsiveStyleBlock(): string
+    {
+        $mobile = $this->formatResponsiveRules($this->responsiveRules['mobile']);
+        $tablet = $this->formatResponsiveRules($this->responsiveRules['tablet']);
+        $desktop = $this->formatResponsiveRules($this->responsiveRules['desktop']);
+
+        if ($mobile === '' && $tablet === '' && $desktop === '') {
+            return '';
+        }
+
+        $css = $mobile;
+        if ($tablet !== '') {
+            $css .= '@media (min-width: '.ComponentRegistry::RESPONSIVE_BREAKPOINTS['tablet'].'px){'.$tablet.'}';
+        }
+        if ($desktop !== '') {
+            $css .= '@media (min-width: '.ComponentRegistry::RESPONSIVE_BREAKPOINTS['desktop'].'px){'.$desktop.'}';
+        }
+
+        return "<style data-pb-responsive>{$css}</style>\n";
+    }
+
+    /**
+     * @param  array<string, list<string>>  $rules
+     */
+    private function formatResponsiveRules(array $rules): string
+    {
+        $css = '';
+        foreach ($rules as $selector => $declarations) {
+            $css .= $selector.'{'.implode('', array_values(array_unique($declarations))).'}';
+        }
+
+        return $css;
+    }
+
+    /**
+     * @param  'mobile'|'tablet'|'desktop'  $viewport
+     * @param  array<string, mixed>  $props
+     */
+    private function registerResponsiveDeclaration(
+        string $id,
+        string $type,
+        string $prop,
+        mixed $value,
+        string $viewport,
+        array $props,
+        bool $useNaturalLayout = false,
+    ): void {
+        foreach ($this->responsiveDeclarations($type, $prop, $value, $viewport, $props, $useNaturalLayout) as $suffix => $declaration) {
+            $selector = '[id="'.$id.'"]'.$suffix;
+            $this->responsiveRules[$viewport][$selector][] = $declaration;
+        }
+    }
+
+    /**
+     * @param  'mobile'|'tablet'|'desktop'  $viewport
+     * @param  array<string, mixed>  $props
+     * @return array<string, string>
+     */
+    private function responsiveDeclarations(
+        string $type,
+        string $prop,
+        mixed $value,
+        string $viewport,
+        array $props,
+        bool $useNaturalLayout,
+    ): array {
+        if ($prop === 'display') {
+            $display = $value === 'hidden' ? 'none' : (self::INTRINSIC_DISPLAY_MODES[$type] ?? 'block');
+
+            return ['' => "display:{$display};"];
+        }
+
+        return match ("{$type}.{$prop}") {
+            'Section.padding' => ['' => 'padding-block:'.$this->sectionPadding((string) $value, $viewport).';'],
+            'Section.background' => ['' => $this->sectionBackground((string) $value)],
+            'Container.maxWidth' => ['' => 'max-width:'.$this->containerMaxWidth((string) $value).';'],
+            'Container.centered' => ['' => 'margin-inline:'.((bool) $value ? 'auto' : '0').';'],
+            'Heading.align', 'RichText.align' => ['' => 'text-align:'.$this->textAlign((string) $value).';'],
+            'Heading.blockSpacing', 'RichText.blockSpacing' => ['' => 'margin-block:'.$this->blockSpacing((string) $value).';'],
+            'Heading.maxWidth', 'RichText.maxWidth' => ['' => 'max-width:'.$this->containerMaxWidth((string) $value).';'],
+            'Heading.fontSize' => ['' => 'font-size:'.$this->fontSize((string) $value, $this->headingFontSize((int) ($props['level'] ?? 2), $viewport)).';'],
+            'RichText.fontSize' => ['' => 'font-size:'.$this->fontSize((string) $value, '1rem').';'],
+            'Heading.textColor', 'RichText.textColor' => ['' => 'color:'.$this->textColor((string) $value).';'],
+            'Image.aspectRatio' => [' img' => $this->imageAspectRatio((string) $value)],
+            'Button.size' => ['>a' => $this->buttonSize((string) $value)],
+            'Button.variant' => $this->buttonVariant((string) $value),
+            'Hero.align' => ['' => $this->heroAlign((string) $value)],
+            'Hero.background' => $this->heroBackgroundDeclarations((string) $value),
+            'Columns.count', 'CardGrid.columns' => ['' => 'grid-template-columns:repeat('.$this->gridColumnCount($type, (int) $value, $viewport, $useNaturalLayout).',minmax(0,1fr));'],
+            'Columns.gap' => ['' => 'gap:'.$this->columnsGap((string) $value, $viewport).';'],
+            'CardGrid.gap' => ['' => 'gap:'.$this->cardGridGap((string) $value, $viewport).';'],
+            'Spacer.size' => ['' => 'height:'.$this->spacerHeight((string) $value, $viewport).';'],
+            'Divider.style' => ['>hr' => 'border-style:'.$this->borderStyle((string) $value).';'],
+            'Divider.color' => ['>hr' => 'border-color:'.$this->dividerColor((string) $value).';'],
+            default => [],
+        };
+    }
+
+    /** @param 'mobile'|'tablet'|'desktop' $viewport */
+    private function sectionPadding(string $value, string $viewport): string
+    {
+        $compact = $viewport === 'mobile';
+
+        return match ($value) {
+            'none' => '0',
+            'small' => $compact ? '1rem' : '1.5rem',
+            'large' => $compact ? '4rem' : '6rem',
+            default => $compact ? '2rem' : '3rem',
+        };
+    }
+
+    private function sectionBackground(string $value): string
+    {
+        return match ($value) {
+            'muted' => 'background-color:color-mix(in oklab,var(--muted) 50%,transparent);color:var(--foreground);',
+            'primary' => 'background-color:color-mix(in oklab,var(--primary) 10%,transparent);color:var(--foreground);',
+            'dark' => 'background-color:var(--color-zinc-900,#18181b);color:var(--color-zinc-100,#f4f4f5);',
+            default => 'background-color:transparent;color:var(--foreground);',
+        };
+    }
+
+    private function backgroundClass(string $value): string
+    {
+        return match ($value) {
+            'muted' => 'bg-muted/50 text-foreground',
+            'primary' => 'bg-primary/10 text-foreground',
+            'dark' => 'bg-zinc-900 text-zinc-100',
+            default => '',
+        };
+    }
+
+    /** @return array{string, string} */
+    private function heroForegroundClasses(string $background): array
+    {
+        return match ($background) {
+            'dark' => ['text-zinc-100', 'text-zinc-200'],
+            'muted', 'primary' => ['text-foreground', 'text-foreground'],
+            default => ['text-foreground', 'text-muted-foreground'],
+        };
+    }
+
+    /** @return array<string, string> */
+    private function heroBackgroundDeclarations(string $background): array
+    {
+        [$titleColor, $subtitleColor] = match ($background) {
+            'dark' => ['var(--color-zinc-100,#f4f4f5)', 'var(--color-zinc-200,#e4e4e7)'],
+            'muted', 'primary' => ['var(--foreground)', 'var(--foreground)'],
+            default => ['var(--foreground)', 'var(--muted-foreground)'],
+        };
+
+        return [
+            '' => $this->sectionBackground($background),
+            '>h1' => "color:{$titleColor};",
+            '>p' => "color:{$subtitleColor};",
+        ];
+    }
+
+    private function blockSpacing(string $value): string
+    {
+        return match ($value) {
+            'none' => '0',
+            'medium' => '1rem',
+            'large' => '1.5rem',
+            default => '0.5rem',
+        };
+    }
+
+    private function blockSpacingClass(string $value): string
+    {
+        return match ($value) {
+            'none' => 'my-0',
+            'medium' => 'my-4',
+            'large' => 'my-6',
+            default => 'my-2',
+        };
+    }
+
+    private function containerMaxWidth(string $value): string
+    {
+        return match ($value) {
+            'sm' => '640px',
+            'md' => '768px',
+            'xl' => '1280px',
+            'full' => '100%',
+            default => '1024px',
+        };
+    }
+
+    private function maxWidthClass(string $value, string $fullClass = ''): string
+    {
+        return match ($value) {
+            'sm' => 'max-w-screen-sm',
+            'md' => 'max-w-screen-md',
+            'lg' => 'max-w-screen-lg',
+            'xl' => 'max-w-screen-xl',
+            default => $fullClass,
+        };
+    }
+
+    private function fontSize(string $value, string $semanticValue): string
+    {
+        return match ($value) {
+            'small' => '0.875rem',
+            'medium' => '1rem',
+            'large' => '1.25rem',
+            'xlarge' => '1.875rem',
+            default => $semanticValue,
+        };
+    }
+
+    private function fontSizeClass(string $value): string
+    {
+        return match ($value) {
+            'small' => 'text-sm',
+            'medium' => 'text-base',
+            'large' => 'text-xl',
+            'xlarge' => 'text-3xl',
+            default => '',
+        };
+    }
+
+    private function textColor(string $value): string
+    {
+        return match ($value) {
+            'soft' => 'color-mix(in oklab,var(--foreground) 90%,transparent)',
+            'muted' => 'var(--muted-foreground)',
+            'primary' => 'var(--primary)',
+            default => 'var(--foreground)',
+        };
+    }
+
+    private function textColorClass(string $value, string $defaultClass): string
+    {
+        return match ($value) {
+            'foreground' => 'text-foreground',
+            'soft' => 'text-foreground/90',
+            'muted' => 'text-muted-foreground',
+            'primary' => 'text-primary',
+            default => $defaultClass,
+        };
+    }
+
+    /** @param 'mobile'|'tablet'|'desktop' $viewport */
+    private function headingFontSize(int $level, string $viewport): string
+    {
+        $sizes = [
+            1 => ['1.875rem', '2.25rem'],
+            2 => ['1.5rem', '1.875rem'],
+            3 => ['1.25rem', '1.5rem'],
+            4 => ['1.125rem', '1.25rem'],
+            5 => ['1rem', '1.125rem'],
+            6 => ['0.875rem', '1rem'],
+        ];
+        [$mobile, $wider] = $sizes[max(1, min(6, $level))];
+
+        return $viewport === 'mobile' ? $mobile : $wider;
+    }
+
+    private function textAlign(string $value): string
+    {
+        return in_array($value, ['center', 'right'], true) ? $value : 'left';
+    }
+
+    private function imageAspectRatio(string $value): string
+    {
+        return match ($value) {
+            '16:9' => 'aspect-ratio:16/9;height:auto;max-height:none;object-fit:cover;',
+            '4:3' => 'aspect-ratio:4/3;height:auto;max-height:none;object-fit:cover;',
+            '1:1' => 'aspect-ratio:1;height:auto;max-height:none;object-fit:cover;',
+            default => 'aspect-ratio:auto;height:auto;max-height:500px;object-fit:cover;',
+        };
+    }
+
+    private function buttonSize(string $value): string
+    {
+        return match ($value) {
+            'sm' => 'height:2rem;padding-inline:0.75rem;font-size:0.75rem;font-weight:500;',
+            'lg' => 'height:2.75rem;padding-inline:1.5rem;font-size:1rem;font-weight:600;',
+            default => 'height:2.25rem;padding-inline:1rem;font-size:0.875rem;font-weight:500;',
+        };
+    }
+
+    /** @return array<string, string> */
+    private function buttonVariant(string $value): array
+    {
+        return match ($value) {
+            'secondary' => [
+                '>a' => 'border:0;background-color:var(--secondary);color:var(--secondary-foreground);',
+                '>a:hover' => 'background-color:color-mix(in oklab,var(--secondary) 80%,transparent);',
+            ],
+            'outline' => [
+                '>a' => 'border:1px solid var(--input);background-color:var(--background);color:inherit;',
+                '>a:hover' => 'background-color:var(--accent);color:var(--accent-foreground);',
+            ],
+            'ghost' => [
+                '>a' => 'border:0;background-color:transparent;color:inherit;',
+                '>a:hover' => 'background-color:var(--accent);color:var(--accent-foreground);',
+            ],
+            default => [
+                '>a' => 'border:0;background-color:var(--primary);color:var(--primary-foreground);',
+                '>a:hover' => 'background-color:color-mix(in oklab,var(--primary) 90%,transparent);',
+            ],
+        };
+    }
+
+    private function heroAlign(string $value): string
+    {
+        return match ($value) {
+            'left' => 'text-align:left;align-items:flex-start;',
+            'right' => 'text-align:right;align-items:flex-end;',
+            default => 'text-align:center;align-items:center;',
+        };
+    }
+
+    /** @param 'mobile'|'tablet'|'desktop' $viewport */
+    private function gridColumnCount(string $type, int $value, string $viewport, bool $useNaturalLayout): int
+    {
+        if (! $useNaturalLayout) {
+            return $value;
+        }
+        if ($viewport === 'mobile') {
+            return 1;
+        }
+        if ($type === 'CardGrid' && $value === 4 && $viewport === 'tablet') {
+            return 2;
+        }
+
+        return $value;
+    }
+
+    /** @param 'mobile'|'tablet'|'desktop' $viewport */
+    private function columnsGap(string $value, string $viewport): string
+    {
+        $compact = $viewport === 'mobile';
+
+        return match ($value) {
+            'small' => $compact ? '0.75rem' : '1rem',
+            'large' => $compact ? '2rem' : '3rem',
+            default => $compact ? '1.5rem' : '2rem',
+        };
+    }
+
+    /** @param 'mobile'|'tablet'|'desktop' $viewport */
+    private function cardGridGap(string $value, string $viewport): string
+    {
+        $compact = $viewport === 'mobile';
+
+        return match ($value) {
+            'small' => $compact ? '0.75rem' : '1rem',
+            'large' => $compact ? '2rem' : '2.5rem',
+            default => '1.5rem',
+        };
+    }
+
+    /** @param 'mobile'|'tablet'|'desktop' $viewport */
+    private function spacerHeight(string $value, string $viewport): string
+    {
+        $compact = $viewport === 'mobile';
+
+        return match ($value) {
+            'small' => $compact ? '1rem' : '1.5rem',
+            'large' => $compact ? '4rem' : '5rem',
+            'xlarge' => $compact ? '6rem' : '8rem',
+            default => $compact ? '2rem' : '3rem',
+        };
+    }
+
+    private function borderStyle(string $value): string
+    {
+        return in_array($value, ['dashed', 'dotted'], true) ? $value : 'solid';
+    }
+
+    private function dividerColor(string $value): string
+    {
+        return match ($value) {
+            'primary' => 'color-mix(in oklab,var(--primary) 40%,transparent)',
+            'subtle' => 'color-mix(in oklab,var(--border) 40%,transparent)',
+            default => 'var(--border)',
+        };
     }
 
     /**

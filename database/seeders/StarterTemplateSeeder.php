@@ -35,6 +35,11 @@ class StarterTemplateSeeder extends Seeder
                 );
             }
 
+            $canonicalDocument = $result->getSanitizedDocument();
+            if ($canonicalDocument === null) {
+                throw new RuntimeException("Seeded template '{$data['slug']}' could not be canonicalized.");
+            }
+
             $existing = PageTemplate::whereNull('website_id')
                 ->where('slug', $data['slug'])
                 ->first();
@@ -46,7 +51,7 @@ class StarterTemplateSeeder extends Seeder
                         'description' => $data['description'],
                         'category' => $data['category'],
                         'schema_version' => 1,
-                        'document_json' => $data['document_json'],
+                        'document_json' => $canonicalDocument,
                         'is_active' => true,
                     ]);
                 }
@@ -62,7 +67,7 @@ class StarterTemplateSeeder extends Seeder
                 'description' => $data['description'],
                 'category' => $data['category'],
                 'schema_version' => 1,
-                'document_json' => $data['document_json'],
+                'document_json' => $canonicalDocument,
                 'is_active' => true,
             ]);
         }

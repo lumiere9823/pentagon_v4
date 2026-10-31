@@ -4,6 +4,7 @@ namespace Tests\Feature\Publishing;
 
 use App\Domains\Publishing\Exceptions\MediaUnavailableException;
 use App\Domains\Publishing\Exceptions\PublishFailedException;
+use App\Domains\Publishing\Exceptions\PublishValidationException;
 use App\Domains\Publishing\Services\PagePublishingService;
 use App\Enums\MediaAssetStatus;
 use App\Enums\PageReleaseStatus;
@@ -181,6 +182,49 @@ class PagePublishingServiceTest extends TestCase
         $this->assertEquals($latestRev->id, $release->page_revision_id);
     }
 
+    public function test_publish_uses_canonical_snapshot_and_does_not_modify_existing_sealed_release_files(): void
+    {
+        [$page, $user] = $this->createPageWithDraft($this->createValidDocument('First release'));
+        $firstRelease = $this->publishingService->publish($page, $user);
+        $storage = Storage::disk('local');
+        $firstHtmlPath = $firstRelease->directory_path.'/index.html';
+        $firstManifestPath = $firstRelease->directory_path.'/manifest.json';
+        $firstHtml = $storage->get($firstHtmlPath);
+        $firstManifest = $storage->get($firstManifestPath);
+        $aliasDocument = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'publish_alias_root',
+                'type' => 'Section',
+                'props' => [],
+                'children' => [[
+                    'id' => 'publish_alias_text',
+                    'type' => 'Rich Text',
+                    'props' => ['content' => '<p onclick="alert(1)">Canonical release</p><script>alert(2)</script>'],
+                    'children' => [],
+                ]],
+            ],
+        ];
+        $page->update(['document_json' => $aliasDocument]);
+
+        $secondRelease = $this->publishingService->publish($page->fresh(), $user);
+
+        $publishedRevision = PageRevision::findOrFail($secondRelease->page_revision_id);
+        $this->assertSame('RichText', $publishedRevision->document_json['root']['children'][0]['type']);
+        $this->assertStringContainsString('Canonical release', $publishedRevision->document_json['root']['children'][0]['props']['content']);
+        $this->assertStringNotContainsString('onclick', $publishedRevision->document_json['root']['children'][0]['props']['content']);
+        $this->assertStringNotContainsString('<script', $publishedRevision->document_json['root']['children'][0]['props']['content']);
+        $this->assertSame(PageRevision::canonicalizeDocument($publishedRevision->document_json), $publishedRevision->document_hash);
+
+        $secondHtml = $storage->get($secondRelease->directory_path.'/index.html');
+        $this->assertStringContainsString('Canonical release', $secondHtml);
+        $this->assertStringNotContainsString('onclick', $secondHtml);
+        $this->assertStringNotContainsString('alert(2)', $secondHtml);
+        $this->assertSame($firstHtml, $storage->get($firstHtmlPath));
+        $this->assertSame($firstManifest, $storage->get($firstManifestPath));
+        $this->assertSame('Rich Text', $page->fresh()->document_json['root']['children'][0]['type']);
+    }
+
     public function test_publish_fails_closed_when_document_is_null_or_invalid(): void
     {
         [$page, $user, $website] = $this->createPageWithDraft();
@@ -188,6 +232,30 @@ class PagePublishingServiceTest extends TestCase
 
         $this->expectException(PublishFailedException::class);
         $this->publishingService->publish($page, $user);
+    }
+
+    public function test_publish_rejects_invalid_non_null_document_without_creating_release(): void
+    {
+        [$page, $user] = $this->createPageWithDraft();
+        $page->update([
+            'document_json' => [
+                'schemaVersion' => 1,
+                'root' => [
+                    'id' => 'invalid_publish_root',
+                    'type' => 'Unknown Widget',
+                    'props' => [],
+                    'children' => [],
+                ],
+            ],
+        ]);
+
+        try {
+            $this->publishingService->publish($page->fresh(), $user);
+            $this->fail('Publishing an unknown component type should fail closed.');
+        } catch (PublishValidationException) {
+            $this->assertDatabaseMissing('page_releases', ['page_id' => $page->id]);
+            $this->assertDatabaseMissing('page_revisions', ['page_id' => $page->id]);
+        }
     }
 
     public function test_publish_fails_closed_when_referenced_media_asset_is_unavailable(): void

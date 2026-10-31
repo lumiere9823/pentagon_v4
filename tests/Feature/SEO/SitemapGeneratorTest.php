@@ -3,10 +3,13 @@
 use App\Domains\SEO\Services\SitemapGenerator;
 use App\Enums\PageReleaseStatus;
 use App\Enums\PageStatus;
+use App\Enums\WebsiteRole;
 use App\Models\Page;
 use App\Models\PageRelease;
 use App\Models\PageRevision;
+use App\Models\User;
 use App\Models\Website;
+use App\Models\WebsiteMembership;
 
 test('it generates valid W3C XML sitemap only for published active pages without noindex', function () {
     $generator = new SitemapGenerator;
@@ -68,4 +71,64 @@ test('it generates valid W3C XML sitemap only for published active pages without
         ->and($xml)->not->toContain('/sites/sitemap-test/hidden')
         ->and($xml)->not->toContain('/sites/sitemap-test/draft')
         ->and($xml)->not->toContain('/sites/sitemap-test/unreleased');
+});
+
+test('unpublishing a published page immediately excludes it from sitemap while retaining other published pages (MQA-03)', function () {
+    $owner = User::factory()->create();
+    $website = Website::factory()->create(['slug' => 'dynamic-sitemap-site']);
+    WebsiteMembership::factory()->create([
+        'website_id' => $website->id,
+        'user_id' => $owner->id,
+        'role' => WebsiteRole::OWNER,
+    ]);
+
+    // Page A (Published with Active Release)
+    $pageA = Page::factory()->create([
+        'website_id' => $website->id,
+        'title' => 'Alpha Page',
+        'slug' => 'alpha',
+        'status' => PageStatus::PUBLISHED,
+    ]);
+    $revA = PageRevision::factory()->create(['page_id' => $pageA->id]);
+    PageRelease::factory()->create([
+        'page_id' => $pageA->id,
+        'page_revision_id' => $revA->id,
+        'status' => PageReleaseStatus::ACTIVE,
+    ]);
+
+    // Page B (Published with Active Release)
+    $pageB = Page::factory()->create([
+        'website_id' => $website->id,
+        'title' => 'Beta Page',
+        'slug' => 'beta',
+        'status' => PageStatus::PUBLISHED,
+    ]);
+    $revB = PageRevision::factory()->create(['page_id' => $pageB->id]);
+    PageRelease::factory()->create([
+        'page_id' => $pageB->id,
+        'page_revision_id' => $revB->id,
+        'status' => PageReleaseStatus::ACTIVE,
+    ]);
+
+    // Initial sitemap contains both pages
+    $initialXml = $this->get("/sites/{$website->slug}/sitemap.xml")
+        ->assertOk()
+        ->getContent();
+
+    expect($initialXml)->toContain('/sites/dynamic-sitemap-site/alpha')
+        ->and($initialXml)->toContain('/sites/dynamic-sitemap-site/beta');
+
+    // Unpublish Page A
+    $this->actingAs($owner)
+        ->postJson(route('websites.pages.unpublish', ['website' => $website->id, 'page' => $pageA->id]))
+        ->assertOk()
+        ->assertJson(['success' => true, 'status' => 'draft']);
+
+    // Sitemap after unpublish: Alpha excluded, Beta retained
+    $updatedResponse = $this->get("/sites/{$website->slug}/sitemap.xml");
+    $updatedResponse->assertOk();
+    $updatedXml = $updatedResponse->getContent();
+
+    expect($updatedXml)->not->toContain('/sites/dynamic-sitemap-site/alpha')
+        ->and($updatedXml)->toContain('/sites/dynamic-sitemap-site/beta');
 });
