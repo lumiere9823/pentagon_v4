@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { ArrowLeft, Globe } from '@lucide/vue';
+import { ArrowLeft, FileText, Globe } from '@lucide/vue';
 import InputError from '@/components/InputError.vue';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
     Card,
@@ -132,6 +133,68 @@ const submit = () => {
                         </Button>
                     </div>
                 </form>
+            </CardContent>
+        </Card>
+
+        <Card>
+            <CardHeader>
+                <div class="flex items-center gap-3">
+                    <div
+                        class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary"
+                    >
+                        <FileText class="h-5 w-5" />
+                    </div>
+                    <div>
+                        <CardTitle>Starter pages</CardTitle>
+                        <CardDescription>
+                            Your website will be provisioned with three draft
+                            starter pages.
+                        </CardDescription>
+                    </div>
+                </div>
+            </CardHeader>
+            <CardContent class="space-y-4">
+                <div class="divide-y rounded-lg border bg-muted/20">
+                    <div
+                        class="flex items-center justify-between p-3 text-sm"
+                        data-testid="starter-page-home"
+                    >
+                        <div class="flex items-center gap-2">
+                            <span class="font-medium text-foreground"
+                                >Home</span
+                            >
+                            <Badge variant="secondary" class="text-[10px]">
+                                Homepage
+                            </Badge>
+                        </div>
+                        <span class="font-mono text-xs text-muted-foreground"
+                            >/</span
+                        >
+                    </div>
+                    <div
+                        class="flex items-center justify-between p-3 text-sm"
+                        data-testid="starter-page-about"
+                    >
+                        <span class="font-medium text-foreground">About</span>
+                        <span class="font-mono text-xs text-muted-foreground"
+                            >/about</span
+                        >
+                    </div>
+                    <div
+                        class="flex items-center justify-between p-3 text-sm"
+                        data-testid="starter-page-contact"
+                    >
+                        <span class="font-medium text-foreground">Contact</span>
+                        <span class="font-mono text-xs text-muted-foreground"
+                            >/contact</span
+                        >
+                    </div>
+                </div>
+                <p class="text-xs text-muted-foreground">
+                    Starter pages are created as drafts and remain private until
+                    published. You can edit content, customize SEO, or change
+                    page slugs before publishing.
+                </p>
             </CardContent>
         </Card>
     </div>

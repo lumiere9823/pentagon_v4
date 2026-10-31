@@ -74,6 +74,7 @@ class WebsiteController extends Controller
 
         $pages = $website->pages()
             ->with(['creator:id,name', 'updater:id,name'])
+            ->orderByDesc('is_homepage')
             ->orderBy('created_at', 'desc')
             ->get()
             ->map(function ($page) {
@@ -81,6 +82,7 @@ class WebsiteController extends Controller
                     'id' => $page->id,
                     'title' => $page->title,
                     'slug' => $page->slug,
+                    'is_homepage' => (bool) $page->is_homepage,
                     'status' => $page->status->value,
                     'creator' => $page->creator?->only(['id', 'name']),
                     'updater' => $page->updater?->only(['id', 'name']),

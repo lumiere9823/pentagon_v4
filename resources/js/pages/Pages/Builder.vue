@@ -13,6 +13,7 @@ interface PageSummary {
     id: number;
     title: string;
     slug: string;
+    is_homepage?: boolean;
     status: 'draft' | 'published' | 'archived' | string;
     lock_version?: number;
     updated_at: string | null;

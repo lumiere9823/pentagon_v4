@@ -9,6 +9,8 @@ import {
     Edit3,
     EyeOff,
     FileText,
+    Globe,
+    Home,
     Inbox,
     LayoutTemplate,
     Plus,
@@ -36,6 +38,7 @@ type PageItem = {
     id: number;
     title: string;
     slug: string;
+    is_homepage: boolean;
     status: 'draft' | 'published' | 'archived';
     creator: { id: number; name: string } | null;
     updater: { id: number; name: string } | null;
@@ -158,6 +161,14 @@ const deletePage = (pageId: number, pageTitle: string) => {
     }
 };
 
+const setAsHomepage = (pageId: number, pageTitle: string) => {
+    if (confirm(`Set "${pageTitle}" as the homepage for this website?`)) {
+        router.put(`/websites/${props.website.id}/homepage`, {
+            page_id: pageId,
+        });
+    }
+};
+
 const unpublishPage = (pageId: number, pageTitle: string) => {
     if (
         confirm(
@@ -235,6 +246,18 @@ const getStatusBadge = (status: string) => {
             </div>
 
             <div class="flex items-center gap-3">
+                <Button variant="outline" as-child>
+                    <a
+                        :href="`/sites/${website.slug}`"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Visit Public Website"
+                        data-testid="visit-site-link"
+                    >
+                        <Globe class="mr-2 h-4 w-4" />
+                        Visit Site
+                    </a>
+                </Button>
                 <Button variant="outline" as-child>
                     <Link :href="`/websites/${website.id}/submissions`">
                         <Inbox class="mr-2 h-4 w-4" />
@@ -352,14 +375,39 @@ const getStatusBadge = (status: string) => {
                     v-for="page in pages"
                     :key="page.id"
                     class="grid grid-cols-12 items-center gap-4 border-b px-6 py-4 last:border-b-0 hover:bg-muted/30"
+                    :data-testid="
+                        page.is_homepage
+                            ? 'homepage-row'
+                            : `page-row-${page.id}`
+                    "
                 >
                     <div class="col-span-5">
-                        <div class="font-medium text-foreground">
-                            {{ page.title }}
+                        <div class="flex items-center gap-2">
+                            <span class="font-medium text-foreground">
+                                {{ page.title }}
+                            </span>
+                            <Badge
+                                v-if="page.is_homepage"
+                                variant="default"
+                                class="text-[10px]"
+                                data-testid="homepage-badge"
+                            >
+                                Homepage
+                            </Badge>
                         </div>
-                        <div class="font-mono text-xs text-muted-foreground">
-                            /{{ page.slug }}
+                        <div
+                            class="font-mono text-xs text-muted-foreground"
+                            data-testid="page-path"
+                        >
+                            {{ page.is_homepage ? '/' : `/${page.slug}` }}
                         </div>
+                        <p
+                            v-if="page.is_homepage"
+                            class="mt-1 text-[11px] text-muted-foreground"
+                        >
+                            Set another page as homepage before deleting this
+                            page.
+                        </p>
                     </div>
                     <div class="col-span-3">
                         <Badge
@@ -377,6 +425,20 @@ const getStatusBadge = (status: string) => {
                         {{ new Date(page.updated_at).toLocaleDateString() }}
                     </div>
                     <div class="col-span-2 flex items-center justify-end gap-2">
+                        <Button
+                            v-if="can.update && !page.is_homepage"
+                            variant="ghost"
+                            size="sm"
+                            class="h-8 px-2 text-xs"
+                            title="Set as homepage"
+                            data-testid="set-homepage-btn"
+                            @click="setAsHomepage(page.id, page.title)"
+                        >
+                            <Home class="mr-1 h-3.5 w-3.5" />
+                            <span class="hidden xl:inline"
+                                >Set as homepage</span
+                            >
+                        </Button>
                         <Button
                             variant="outline"
                             size="sm"
@@ -416,15 +478,29 @@ const getStatusBadge = (status: string) => {
                         >
                             <EyeOff class="h-4 w-4" />
                         </Button>
-                        <Button
-                            v-if="can.create_page"
-                            variant="ghost"
-                            size="icon"
-                            class="text-destructive hover:bg-destructive/10"
-                            @click="deletePage(page.id, page.title)"
-                        >
-                            <Trash2 class="h-4 w-4" />
-                        </Button>
+                        <template v-if="can.create_page">
+                            <Button
+                                v-if="page.is_homepage"
+                                variant="ghost"
+                                size="icon"
+                                disabled
+                                class="cursor-not-allowed opacity-40"
+                                title="Set another page as homepage before deleting this page."
+                                aria-label="Set another page as homepage before deleting this page."
+                                data-testid="delete-homepage-disabled-btn"
+                            >
+                                <Trash2 class="h-4 w-4" />
+                            </Button>
+                            <Button
+                                v-else
+                                variant="ghost"
+                                size="icon"
+                                class="text-destructive hover:bg-destructive/10"
+                                @click="deletePage(page.id, page.title)"
+                            >
+                                <Trash2 class="h-4 w-4" />
+                            </Button>
+                        </template>
                     </div>
                 </div>
             </div>

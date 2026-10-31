@@ -23,6 +23,7 @@ type PageData = {
     id: number;
     title: string;
     slug: string;
+    is_homepage?: boolean;
     status: 'draft' | 'published' | 'archived';
     created_at: string;
     updated_at: string;
@@ -129,7 +130,16 @@ const submit = () => {
                     </div>
 
                     <div class="space-y-2">
-                        <Label for="slug">Page Slug</Label>
+                        <div class="flex items-center justify-between">
+                            <Label for="slug">Page Slug</Label>
+                            <span
+                                v-if="page.is_homepage"
+                                class="font-mono text-xs font-medium text-primary"
+                                data-testid="effective-homepage-path"
+                            >
+                                Effective public path: /
+                            </span>
+                        </div>
                         <div
                             class="flex items-center rounded-md border bg-muted/40 px-3"
                         >
@@ -144,6 +154,16 @@ const submit = () => {
                                 required
                             />
                         </div>
+                        <p
+                            v-if="page.is_homepage"
+                            class="text-xs text-muted-foreground"
+                        >
+                            This page is currently the homepage with public path
+                            <code class="font-mono text-xs">/</code>. Its
+                            technical slug remains stored and will become its
+                            active path if another page is designated as
+                            homepage.
+                        </p>
                         <InputError :message="form.errors.slug" />
                     </div>
 

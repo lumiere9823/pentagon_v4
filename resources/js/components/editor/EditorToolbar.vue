@@ -46,6 +46,7 @@ interface PageSummary {
     id: number;
     title: string;
     slug: string;
+    is_homepage?: boolean;
     status: 'draft' | 'published' | 'archived' | string;
     updated_at?: string | null;
 }
@@ -225,6 +226,15 @@ const getStatusBadge = (status: string) => {
                     >
                         {{ page.title }}
                     </span>
+                    <Badge
+                        v-if="page.is_homepage"
+                        variant="secondary"
+                        class="hidden text-[10px] sm:inline-flex"
+                        title="Canonical public path: /"
+                        data-testid="builder-homepage-badge"
+                    >
+                        Homepage (/)
+                    </Badge>
                     <Badge
                         :variant="getStatusBadge(page.status).variant"
                         class="hidden text-[10px] capitalize sm:inline-flex"
