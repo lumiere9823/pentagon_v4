@@ -133,11 +133,10 @@ npm run dev
 
 Mỗi lệnh trên cần một terminal riêng. Sau khi đăng nhập, luồng sử dụng cơ bản là:
 
-1. Tạo một website.
-2. Tạo page từ starter template.
-3. Mở Builder để chỉnh sửa và preview.
-4. Publish page.
-5. Truy cập URL public dạng `/sites/{website-slug}/{page-slug}`.
+1. Tạo một website (hệ thống tự động khởi tạo bộ starter pages ở trạng thái nháp: Home `/`, About `/about`, Contact `/contact`).
+2. Mở Builder để chỉnh sửa trang Home hoặc tạo page mới từ template.
+3. Publish page.
+4. Truy cập URL public: `/sites/{website-slug}` cho trang chủ (Home), hoặc `/sites/{website-slug}/{page-slug}` cho các trang con.
 
 ## Cài đặt nhanh bằng Composer
 

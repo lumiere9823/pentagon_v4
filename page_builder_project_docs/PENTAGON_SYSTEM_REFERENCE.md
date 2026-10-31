@@ -4,7 +4,7 @@
 >
 > **Nguồn sự thật:** mọi mô tả dưới đây được đối chiếu trực tiếp với mã nguồn trong working tree (ngày 2026-10-24). Nếu tài liệu và code mâu thuẫn, **code là chuẩn**. Khi sửa code làm thay đổi hành vi được mô tả ở đây, hãy cập nhật file này trong cùng commit.
 >
-> **Quy ước:** tên class/hàm/route giữ nguyên tiếng Anh. Mã quyết định `D-0xx` tham chiếu tới Nhật ký quyết định ở [§20](#20-nhật-ký-quyết-định-kiến-trúc-d-001--d-047). Các điểm lệch giữa thiết kế và hiện thực được gom ở [§21](#21-hạn-chế-đã-biết-và-khoảng-trống).
+> **Quy ước:** tên class/hàm/route giữ nguyên tiếng Anh. Mã quyết định `D-0xx` tham chiếu tới Nhật ký quyết định ở [§20](#20-nhật-ký-quyết-định-kiến-trúc-d-001--d-048). Các điểm lệch giữa thiết kế và hiện thực được gom ở [§21](#21-hạn-chế-đã-biết-và-khoảng-trống).
 
 ---
 
@@ -29,7 +29,7 @@
 17. [Vận hành production: deploy, rollback, backup, runbook](#17-vận-hành-production-deploy-rollback-backup-runbook)
 18. [Ngân sách tài nguyên (2 GB RAM / 2 vCPU)](#18-ngân-sách-tài-nguyên-2-gb-ram--2-vcpu)
 19. [Kiểm thử và quality gates](#19-kiểm-thử-và-quality-gates)
-20. [Nhật ký quyết định kiến trúc (D-001 → D-047)](#20-nhật-ký-quyết-định-kiến-trúc-d-001--d-047)
+20. [Nhật ký quyết định kiến trúc (D-001 → D-048)](#20-nhật-ký-quyết-định-kiến-trúc-d-001--d-048)
 21. [Hạn chế đã biết và khoảng trống](#21-hạn-chế-đã-biết-và-khoảng-trống)
 22. [Quy tắc kỹ thuật khi phát triển tiếp](#22-quy-tắc-kỹ-thuật-khi-phát-triển-tiếp)
 23. [Phụ lục: bảng tra nhanh](#23-phụ-lục-bảng-tra-nhanh)
@@ -72,6 +72,7 @@ Pentagon là một **Page Builder Admin**. Người quản trị tạo và quả
 13. SEO: meta, canonical, OpenGraph/Twitter, JSON-LD, sitemap.xml, robots.txt, redirect 301 khi đổi slug.
 14. Endpoint form submission (honeypot, rate limit, giới hạn payload).
 15. Security headers, ma trận phân quyền, chaos test cho publish, health check, script deploy/rollback/backup.
+16. Homepage và bộ Starter Pages (D-048): Mỗi website có đúng 1 homepage; tạo website nguyên tử với 3 trang nháp (Home '/', About '/about', Contact '/contact') kèm revision 1; root công khai /sites/{website-slug} phục vụ release trang chủ; redirect 301 từ technical slug về root; khoá đồng thời khi gán homepage; bảo vệ 422 chống xoá homepage.
 
 ### 1.4 Ngoài phạm vi (non-goals có chủ đích)
 
@@ -1150,6 +1151,45 @@ Tạo page DRAFT, lock_version=1
 
 `StarterTemplateSeeder` tạo 5 template global: `blank` (Blank Canvas), `business-landing`, `portfolio-agency`, `product-waitlist`, `lead-generation`. Mỗi fixture được validate theo schema v1. Seeder **không phá huỷ**: slug đã có thì giữ nguyên, trừ khi chạy với `--force`. Lệnh: `php artisan templates:seed [--force]`.
 
+### 9.6 Khởi tạo Website và bộ Starter Pages (`WebsiteProvisioner`, `StarterSetCatalog`, `HomepageManager` - D-048)
+
+Thư mục: `app/Domains/Websites`.
+
+#### 1. Bộ Starter Set (`StarterSetCatalog`)
+Mã nguồn định nghĩa sẵn 3 starter page độc lập không phụ thuộc database seed:
+- **Home:** title "Home", slug `home`, `is_homepage = true`, tài liệu Schema v1 (Hero + RichText chào mừng).
+- **About:** title "About", slug `about`, `is_homepage = false`, tài liệu Schema v1 (Heading + Paragraph giới thiệu).
+- **Contact:** title "Contact", slug `contact`, `is_homepage = false`, tài liệu Schema v1 (Heading + Paragraph liên hệ).
+
+Mọi starter page AST đều được kiểm tra hợp lệ bằng `DocumentValidator::validateDocument()` khi khởi tạo. Không bao giờ lưu slug `/` hoặc slug rỗng vào DB.
+
+#### 2. Khởi tạo Website nguyên tử (`WebsiteProvisionerInterface` / `WebsiteProvisioner`)
+Khi gọi `WebsiteController::store()`:
+1. Validate dữ liệu đầu vào (`name`, `slug` unique trong bảng `websites`).
+2. Thực thi `WebsiteProvisionerInterface::provision($user, $data)` gói trọn trong một database transaction duy nhất:
+   - Tạo bản ghi `Website` (`owner_id = $user->id`, `status = active`).
+   - Tạo `WebsiteMembership` (`user_id = $user->id`, `role = owner`).
+   - Duyệt catalog starter pages: tạo từng `Page` ở trạng thái `draft`, `lock_version = 1`.
+   - Tạo revision số 1 cho từng trang ("Initial starter page revision") với `document_hash` SHA-256.
+3. Không tự động publish bất kỳ starter page nào. Trang chủ khởi tạo ở trạng thái draft cho đến khi người dùng publish.
+
+#### 3. Quản lý Homepage và Đổi trang chủ (`HomepageManagerInterface` / `HomepageManager`)
+Route: `PUT /websites/{website}/homepage` (`AssignHomepageRequest`):
+- Ủy quyền: policy `update` trên `Website`.
+- Validate: `page_id` phải thuộc về chính website (`Rule::exists('pages', 'id')->where('website_id', $website->id)`).
+- `HomepageManager::assignHomepage($website, $pageId)`:
+  1. Transaction + khoá row website: `Website::where('id', $website->id)->lockForUpdate()`.
+  2. Tìm page chỉ định (thuộc website). Nếu đang là homepage (`is_homepage = true`) thì giữ nguyên (idempotent).
+  3. Cập nhật `is_homepage = false` cho homepage hiện tại của website.
+  4. Cập nhật `is_homepage = true` cho page mới.
+  5. Commit transaction, đảm bảo ở mọi thời điểm chỉ có duy nhất 1 trang có `is_homepage = true`.
+
+#### 4. Bảo vệ chống xoá Homepage (`PageController::destroy`)
+Khi người dùng yêu cầu xoá một page:
+- Nếu `page->is_homepage` là `true`: lập tức từ chối và ném `ValidationException` kèm thông điệp hành động rõ ràng:
+  `Set another page as homepage before deleting this page.` (HTTP 422).
+- Người dùng bắt buộc phải gán một trang khác làm homepage trước khi xoá trang hiện tại.
+
 ---
 
 ## 10. Publishing pipeline, release, preview và public delivery
@@ -1308,19 +1348,40 @@ Endpoint: `POST /websites/{w}/pages/{p}/releases/{release}/rollback` (cần quy�
 - Render với `previewMode=true`, tiêu đề "{title} (Preview)", banner amber "PREVIEW MODE" được truyền qua `bodyPrefixHtml`. `<!DOCTYPE html>` luôn là byte đầu tiên; public output không truyền prefix nên không có banner. Draft rỗng được thay bằng tài liệu tối thiểu "Draft is empty".
 - Header: `Cache-Control: no-store, no-cache, must-revalidate, max-age=0, private`, `Pragma: no-cache`, `Expires: 0`, `X-Robots-Tag: noindex, nofollow, noarchive, nosnippet`.
 
-### 10.8 Phục vụ trang public (`PublicPageController::show`)
+### 10.8 Phục vụ trang public (`PublicPageController`, D-048)
 
-Route `GET sites/{website:slug}/{page:slug}` (`public.sites.pages.show`), không cần đăng nhập, khai báo **cuối cùng** để sitemap/robots được match trước.
+Thư mục: `app/Domains/Pages`.
 
-1. Tìm website theo slug (không có → 404), rồi tìm page theo `(website_id, slug)`.
-2. Page không có hoặc không `PUBLISHED` → `RedirectManager::resolveRedirect` → redirect 301/302 nếu khớp, không thì 404.
+Các route public:
+- `GET sites/{website:slug}` (`public.sites.root`): phục vụ trang chủ (homepage) của website tại canonical root URL.
+- `GET sites/{website:slug}/{page:slug}` (`public.sites.pages.show`): phục vụ trang con, không cần đăng nhập. Khai báo sau cùng để sitemap/robots/forms được match trước.
+
+#### 1. Định vị URL chuẩn (`PublicPageLocatorInterface` / `PublicPageLocator`)
+- `getCanonicalUrl(Page $page)`:
+  - Nếu `page->is_homepage == true` → `url('/sites/' . $website->slug)`
+  - Ngược lại → `url('/sites/' . $website->slug . '/' . $page->slug)`
+- `getWebsiteRelativePath(Page $page)`:
+  - Nếu `page->is_homepage == true` → `/`
+  - Ngược lại → `/{$page->slug}`
+Mọi thành phần (Publishing, SEO meta, Sitemap, UI) đều sử dụng interface này để đảm bảo tính nhất quán của canonical URL.
+
+#### 2. Quy trình phục vụ và xử lý Homepage
+1. **Truy cập root `/sites/{website:slug}`:**
+   - Tìm website theo slug.
+   - Tìm page có `is_homepage = true` thuộc website.
+   - Nếu không có homepage hoặc homepage không ở trạng thái `PUBLISHED` → trả 404.
+   - Lấy release `ACTIVE` của trang homepage và phục vụ file `index.html`.
+2. **Truy cập technical slug `/sites/{website:slug}/{page:slug}`:**
+   - Tìm website và page theo `(website_id, slug)`.
+   - **Redirect vĩnh viễn (301):** Nếu page tìm được có `is_homepage = true`, controller lập tức chuyển hướng 301 Permanent Redirect về canonical root `/sites/{website:slug}`.
+   - Nếu page không tồn tại hoặc không `PUBLISHED` → `RedirectManager::resolveRedirect` → redirect 301/302 nếu khớp, không thì 404.
 3. Tìm release ACTIVE. Không có, không có `directory_path`, hoặc thiếu `index.html` → 404.
 4. **ETag** = `manifest_json.html_hash` (fallback: SHA-256 của file). `If-None-Match` khớp → **304**.
 5. 200 + nội dung file, `Content-Type: text/html; charset=UTF-8`, `Cache-Control: public, max-age=300, must-revalidate`.
 
 HTML được PHP đọc từ storage private (không do Nginx phục vụ trực tiếp). Ngoài HTTP cache, không có cache tầng ứng dụng.
 
-**Unpublish:** không có endpoint riêng. Đổi `status` sang draft/archived qua `PUT …/pages/{p}` thì route public trả 404. Row ACTIVE vẫn được giữ, và sẽ phục vụ lại khi status quay về `published`.
+**Unpublish:** Đổi `status` sang draft/archived qua `PUT …/pages/{p}` hoặc nút Unpublish thì route public (cả root lẫn slug) trả 404. Row ACTIVE vẫn được giữ, và sẽ phục vụ lại khi status quay về `published`.
 
 ---
 
@@ -1347,11 +1408,13 @@ Lưu ở cột `pages.seo_metadata` (jsonb), ghi cùng request `PUT …/content`
 ```text
 title       = meta_title ?? page.title
 description = meta_description ?? ''
-canonical   = canonical_url ?? url("/sites/{website.slug}/{page.slug}")
+canonical   = canonical_url ?? PublicPageLocator::getCanonicalUrl($page)
 og:title    = og_title ?? meta_title ?? page.title
 og:desc     = og_description ?? meta_description ?? ''
 robots      = noindex ? "noindex, nofollow" : (nofollow ? "index, nofollow" : "index, follow")
 ```
+
+Canonical mặc định trỏ về URL công khai chuẩn (`/sites/{website.slug}` đối với trang chủ `is_homepage=true`, hoặc `/sites/{website.slug}/{page.slug}` đối với trang thông thường).
 
 Sinh các thẻ `og:type/title/url/description/image` (ảnh được chuyển thành URL tuyệt đối), `twitter:card/title/description/image`, và JSON-LD `<script type="application/ld+json">`. JSON-LD dùng `structured_data_json` nếu có, không thì `{@context, @type, name, description, url}`, encode với `JSON_HEX_TAG|AMP|APOS|QUOT` để chống thoát khỏi `</script>`.
 
@@ -1368,9 +1431,9 @@ Sinh các thẻ `og:type/title/url/description/image` (ảnh được chuyển t
   - `updateOrCreate`.
 - `resolveRedirect()`: đi theo tối đa `MAX_CHAIN_DEPTH = 5` bước, có phát hiện vòng lặp.
 
-### 11.3 Sitemap và robots (D-038, D-039)
+### 11.3 Sitemap và robots (D-038, D-039, D-048)
 
-- `GET sites/{w}/sitemap.xml`: W3C `urlset`, chỉ gồm page `PUBLISHED`, có release ACTIVE, không `noindex`. `lastmod` = `activated_at`; `changefreq=weekly`; `priority` 1.0 cho slug `home`/`index`, còn lại 0.8.
+- `GET sites/{w}/sitemap.xml`: W3C `urlset`, chỉ gồm page `PUBLISHED`, có release ACTIVE, không `noindex`. `<loc>` được sinh qua `PublicPageLocatorInterface::getCanonicalUrl()` (trang chủ trỏ tới `/sites/{w}`, trang thường tới `/sites/{w}/{slug}`). `lastmod` = `activated_at`; `changefreq=weekly`; `priority` 1.0 cho homepage (`is_homepage=true`) hoặc slug `home`/`index`, còn lại 0.8.
 - `GET sites/{w}/robots.txt`: `Allow: /sites/{slug}/`, `Disallow: /preview/`, `/websites/`, `/dashboard`, kèm dòng `Sitemap:`.
 - Cả hai trả `Cache-Control: public, max-age=3600`.
 
@@ -1427,6 +1490,7 @@ Exception trả về JSON khi path là `api/*` hoặc request `expectsJson()`. H
 |---|---|---|
 | `GET dashboard` | `dashboard` | Inertia |
 | resource `websites` (trừ edit) | `websites.*` | `WebsiteController` |
+| `PUT websites/{w}/homepage` | `websites.homepage.update` | `WebsiteHomepageController` |
 | `POST/PUT/DELETE websites/{w}/memberships[/{m}]` | `websites.memberships.*` | `WebsiteMembershipController` |
 | `GET/POST/PUT/DELETE websites/{w}/media[/{asset}]` | `websites.media.*` | `MediaAssetController` |
 | `GET websites/{w}/pages/create` · `POST websites/{w}/pages` | `websites.pages.create/store` | `PageController` |
@@ -1442,15 +1506,16 @@ Exception trả về JSON khi path là `api/*` hoặc request `expectsJson()`. H
 
 **Public (không cần đăng nhập):**
 
-| Method · URI | Tên |
-|---|---|
-| `GET api/health` · `GET up` | `api.health` |
-| `GET api/components/registry` | `api.components.registry` |
-| `POST sites/{website:slug}/forms/{form_name?}` (throttle 5/1) | `public.sites.forms.submit` |
-| `GET sites/{website:slug}/sitemap.xml` | `public.sites.sitemap` |
-| `GET sites/{website:slug}/robots.txt` | `public.sites.robots` |
-| `GET preview/pages/{page}` (signed) | `preview.signed` |
-| `GET sites/{website:slug}/{page:slug}` | `public.sites.pages.show` |
+| Method · URI | Tên | Controller |
+|---|---|---|
+| `GET api/health` · `GET up` | `api.health` | Health check |
+| `GET api/components/registry` | `api.components.registry` | ComponentRegistryController |
+| `GET sites/{website:slug}` | `public.sites.root` | `PublicPageController@showRoot` |
+| `POST sites/{website:slug}/forms/{form_name?}` (throttle 5/1) | `public.sites.forms.submit` | `FormSubmissionController` |
+| `GET sites/{website:slug}/sitemap.xml` | `public.sites.sitemap` | `SitemapController` |
+| `GET sites/{website:slug}/robots.txt` | `public.sites.robots` | `RobotsController` |
+| `GET preview/pages/{page}` (signed) | `preview.signed` | `PagePreviewController` |
+| `GET sites/{website:slug}/{page:slug}` | `public.sites.pages.show` | `PublicPageController@show` |
 
 ### 13.4 Form request chính
 
@@ -1459,6 +1524,7 @@ Exception trả về JSON khi path là `api/*` hoặc request `expectsJson()`. H
 | `StorePageRequest` | `title` ≤ 255; `slug` alpha_dash ≤ 255, unique theo website (D-007); `template_id` tồn tại trong số template active global/của website |
 | `UpdatePageRequest` | Như trên + `status` `Rule::enum(PageStatus)`; slug unique (bỏ qua chính nó) |
 | `Store/UpdateWebsiteRequest` | `slug` alpha_dash, unique toàn cục |
+| `AssignHomepageRequest` | Owner/Editor (`WebsitePolicy::update`); `page_id` integer bắt buộc, phải thuộc website (`Rule::exists('pages', 'id')->where('website_id', $website->id)`) |
 | `StoreWebsiteMembershipRequest` | Chỉ owner; `email` phải tồn tại trong users; `role ∈ editor|viewer`; từ chối thành viên đã có |
 | `SavePageContentRequest` | Xem §7.2 |
 
@@ -1470,7 +1536,7 @@ Exception trả về JSON khi path là `api/*` hoặc request `expectsJson()`. H
 |---|---|---|
 | `websites` | `owner_id` FK users (cascade), `name`, `slug`, `status` (`active`), `settings_json` jsonb | `slug` unique; index `status`, `owner_id` |
 | `website_memberships` | `website_id`, `user_id` (cascade), `role` | unique `(website_id,user_id)`; index `(website_id,role)` |
-| `pages` | `website_id` (cascade), `title`, `slug`, `document_json` jsonb, `seo_metadata` jsonb, `status` (`draft`), `lock_version` bigint (1), `published_revision_id` FK (nullOnDelete), `created_by`/`updated_by` | unique `(website_id,slug)`; index `(website_id,status)`. **Không có soft delete** |
+| `pages` | `website_id` (cascade), `title`, `slug`, `is_homepage` boolean (false), `document_json` jsonb, `seo_metadata` jsonb, `status` (`draft`), `lock_version` bigint (1), `published_revision_id` FK (nullOnDelete), `created_by`/`updated_by` | unique `(website_id,slug)`; index `(website_id,status)`; **partial unique `pages_one_homepage_per_website` on `(website_id) WHERE is_homepage = true`** (SQLite: `= 1`). **Không có soft delete** |
 | `page_revisions` | `page_id` (cascade), `revision_number`, `schema_version`, `document_json` jsonb, `document_hash` char(64), `change_summary`, `is_autosave`, `created_by`, `created_at` (không có `updated_at`) | unique `(page_id,revision_number)`; index `(page_id,created_at)`, `(page_id,document_hash)` |
 | `page_releases` | `id` **uuid**, `page_id`, `page_revision_id` (cascade), `release_number`, `status`, `schema_version`, `renderer_version`, `manifest_json` jsonb, `directory_path`, `error_message`, `created_by`, `activated_at` | index `(page_id,release_number)`, `(page_id,status)`; **partial unique `page_releases_one_active_per_page`** |
 | `media_assets` | `website_id`, `storage_disk` (`public`), `storage_path` (512), `original_filename`, `status`, `mime_type`, `size_bytes`, `width`, `height`, `alt_text`, `uploaded_by`, `deleted_at` | `storage_path` unique; index `(website_id,created_at)`, `(website_id,original_filename)`, `(website_id,status)` |
@@ -1499,9 +1565,11 @@ Ngoài ra có các bảng chuẩn của framework: `users` (có cột 2FA), `pas
 |---|---|---|---|
 | Khoá lạc quan | `pages.lock_version` | `PUT /content` | Chống ghi đè từ tab/người sửa cũ (409) |
 | Row lock | `SELECT … FOR UPDATE` | Page, template, asset, revision mới nhất | Tuần tự hoá ghi trên cùng một bản ghi |
+| Row lock | `Website::where(...)->lockForUpdate()` | `PUT /websites/{w}/homepage` | Tuần tự hoá gán homepage đồng thời trên cùng website |
 | **MED advisory lock** (D-023) | `pg_advisory_xact_lock((0x4D4544 << 40) \| asset_id)` | Mọi writer có tham chiếu media + delete + pruner | Loại trừ lẫn nhau giữa ghi tài liệu và dọn media |
 | **PUB advisory lock** (D-032) | `pg_try_advisory_xact_lock((0x505542 << 40) \| page_id)` | Phase 1 của publish | Chặn publish đồng thời trên cùng page |
 | Partial unique index | `page_releases (page_id) WHERE status='active'` | Phase 3 / rollback | Đảm bảo tối đa 1 release ACTIVE |
+| Partial unique index | `pages (website_id) WHERE is_homepage=true` | DB schema / HomepageManager | Đảm bảo tối đa 1 homepage trên mỗi website |
 | Rename nguyên tử | `rename(staging → r_n_hash8)` | Staging | Không bao giờ có thư mục release ghi dở |
 
 Key 64-bit = 24 bit namespace (`'MED'`, `'PUB'` dạng ASCII) cộng 40 bit ID (tối đa khoảng 1,1 nghìn tỷ). Cách này tránh giới hạn `(int4,int4)` và không có va chạm hash.
@@ -1547,6 +1615,7 @@ Schedule::command('releases:reconcile')->everyThirtyMinutes(); // staging-ttl=15
 | `media:prune-unreferenced` | `--hours=24 --force --website= --watchdog-only` | §8.6 | FAILURE nếu có lỗi |
 | `releases:reconcile` (D-032/D-042) | `--disk=local --dry-run --staging-ttl=15` | (1) Xoá thư mục `staging_*` cũ hơn TTL. (2) Release PENDING quá TTL → FAILED "Abandoned uncommitted candidate…". (3) Verify mọi release ACTIVE; hỏng → `Log::critical` (không tự sửa) | luôn 0 |
 | `releases:prune-superseded` (D-035) | `--disk=local --dry-run --keep=5 --hours=24` | Với mỗi page: release SUPERSEDED có `page_revision_id ≠ pages.published_revision_id`, cũ hơn 24 giờ, sau 5 bản mới nhất, mỗi lượt tối đa 100 → xoá thư mục, đổi thành PRUNED. **Không bao giờ đụng file media** | luôn 0 |
+| `websites:backfill-homepages` (D-048) | `--commit` | Quét website thiếu homepage và bổ sung theo thứ tự ưu tiên: slug `home` -> trang cũ nhất -> tạo mới trang Home từ catalog. Mặc định dry-run; cần cờ `--commit` để thực thi ghi DB | luôn 0 |
 | `templates:seed` | `--force` | §9.5 | |
 | `app:production-health-check` (D-047) | `--json` | DB + latency; migration chưa chạy; thư mục ghi được (tự tạo 0775 nếu thiếu); `APP_KEY` có, `APP_DEBUG` tắt ở production; probe cache put/get/forget | SUCCESS/FAILURE |
 | `app:benchmark-performance` | `--iterations=10` | Tài liệu 51 node: validate + render N lần, ngân sách < 50 ms, Δmem < 8 MB, peak < 64 MB; trên pgsql chạy `EXPLAIN` 4 truy vấn nóng với `enable_seqscan=off` | |
@@ -1588,7 +1657,7 @@ sudo -u www-data env PENTAGON_REPOSITORY_URL=<git-url> /var/www/pentagon/deploy/
 3. Symlink `shared/.env` và `shared/storage` vào release.
 4. `composer install --no-dev --optimize-autoloader`.
 5. `npm ci && npm run build`, sau đó xoá `node_modules`.
-6. `php artisan migrate --force --isolated`; `config:cache`, `route:cache`, `view:cache`.
+6. `php artisan migrate --force --isolated`; `php artisan websites:backfill-homepages --commit`; `config:cache`, `route:cache`, `view:cache`.
 7. Tạo symlink tạm rồi `mv -T` nguyên tử để đổi `current` sang release mới; reload service từ `PENTAGON_PHP_FPM_SERVICE` (mặc định `php8.4-fpm`).
 8. `app:production-health-check`. Lỗi → **tự động trỏ symlink về release trước**, reload, rồi exit 1.
 9. Xoá release cũ, chỉ giữ 5 bản gần nhất.
@@ -1714,7 +1783,7 @@ Quy tắc: không có sequential scan trên đường nóng; không thêm daemon
 
 ---
 
-## 20. Nhật ký quyết định kiến trúc (D-001 → D-047)
+## 20. Nhật ký quyết định kiến trúc (D-001 → D-048)
 
 Toàn bộ quyết định đều ở trạng thái **Accepted và đã hiện thực**. Chi tiết kỹ thuật của từng quyết định nằm trong các mục tương ứng ở trên.
 
@@ -1767,6 +1836,30 @@ Toàn bộ quyết định đều ở trạng thái **Accepted và đã hiện t
 | D-045 | Backup + diễn tập khôi phục | pg_dump + tar + SHA256 | §17.4 |
 | D-046 | Hardening Nginx, cấm thực thi script trong uploads | TLS 1.2/1.3, HSTS | §17.5 |
 | D-047 | Health check, smoke test, runbook | MTTR thấp | §16, §17.6 |
+| D-048 | Homepage & Starter Page Set | Mỗi website có đúng 1 homepage, root /sites/{slug}, starter set (Home, About, Contact), partial unique index | §9.6, §10.8, §14, §15, §16 |
+
+### D-048 — Homepage và Starter Page Set
+- Ngày / Trạng thái: 2026-10-31 / Accepted & Implemented
+- Bối cảnh: Website mới tạo chưa có nội dung, người dùng phải tự tạo trang đầu tiên. Chưa có khái niệm trang chủ chính thức, đường dẫn trang public luôn bắt buộc có slug trang (`/sites/{w}/{p}`).
+- Các phương án đã cân nhắc:
+  - Phương án 1: Dùng slug đặc biệt rỗng hoặc `/` trong database cho trang chủ. (Bị bác bỏ: làm phá vỡ quy ước slug `alpha_dash`, gây lỗi routing và URL encoding).
+  - Phương án 2: Cột `websites.homepage_page_id` khóa ngoại tới `pages.id`. (Bị bác bỏ: tạo circular dependency giữa `websites` và `pages`, phức tạp hóa việc tạo website và xóa trang).
+  - Phương án 3 (Được chọn): Cột `pages.is_homepage` boolean có partial unique index `pages_one_homepage_per_website` trên `(website_id) WHERE is_homepage = true`. Bổ sung service `WebsiteProvisioner`, `StarterSetCatalog`, `HomepageManager` và `PublicPageLocator`.
+- Quyết định:
+  1. Mỗi website đã commit có đúng một homepage.
+  2. Tạo website nguyên tử sinh ra 3 trang starter ở trạng thái draft (Home, About, Contact) kèm revision 1. Home là homepage ban đầu.
+  3. Route công khai canonical root `/sites/{website-slug}` phục vụ release active của homepage. Nếu homepage chưa publish hoặc chưa có release thì trả 404.
+  4. Truy cập URL technical slug của homepage hiện tại (`/sites/{website-slug}/{homepage-technical-slug}`) trả 301 Permanent Redirect về canonical root.
+  5. Đổi homepage qua route `PUT /websites/{w}/homepage` sử dụng row locking (`Website::where(...)->lockForUpdate()`) đảm bảo an toàn đồng thời.
+  6. Xóa homepage bị chặn với mã lỗi 422 cho đến khi một trang khác được gán làm homepage.
+  7. Lệnh backfill `php artisan websites:backfill-homepages [--commit]` tự động bổ sung homepage cho các website cũ và tích hợp vào script deploy.
+- Hệ quả:
+  - Tất cả URL canonical của trang chủ (Public delivery, SEO meta, Sitemap, UI) thống nhất sử dụng `/sites/{website-slug}` và website-relative path `/`.
+  - Không phá vỡ dữ liệu cũ; lệnh backfill chạy tự động sau migration trên môi trường deploy.
+- Bằng chứng (file, test):
+  - Migration: `database/migrations/2026_10_31_140000_add_is_homepage_to_pages_table.php`
+  - Domain & Services: `app/Domains/Websites/Services/WebsiteProvisioner.php`, `StarterSetCatalog.php`, `HomepageManager.php`, `app/Domains/Pages/Services/PublicPageLocator.php`
+  - Tests: `tests/Feature/Pages/HomepageDataModelTest.php`, `tests/Feature/Websites/WebsiteProvisionerTest.php`, `tests/Feature/Websites/HomepageAssignmentTest.php`, `tests/Feature/Pages/HomepageConcurrencyTest.php`, `tests/Feature/Pages/PublicPageLocatorTest.php`, `tests/Feature/Websites/BackfillWebsitesHomepagesCommandTest.php`, `tests/frontend/homepage-starter-set-ui.test.ts`, `tests/e2e/core-workflow.spec.ts`
 
 **Mẫu ghi quyết định mới:**
 
