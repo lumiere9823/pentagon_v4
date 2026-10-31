@@ -223,7 +223,7 @@ const getStatusBadge = (status: string) => {
         >
             <div class="flex items-center gap-3">
                 <Button variant="ghost" size="icon" as-child>
-                    <Link href="/websites">
+                    <Link href="/websites" aria-label="Back to Websites">
                         <ArrowLeft class="h-4 w-4" />
                     </Link>
                 </Button>
@@ -431,6 +431,7 @@ const getStatusBadge = (status: string) => {
                             size="sm"
                             class="h-8 px-2 text-xs"
                             title="Set as homepage"
+                            :aria-label="`Set ${page.title} as homepage`"
                             data-testid="set-homepage-btn"
                             @click="setAsHomepage(page.id, page.title)"
                         >
@@ -448,6 +449,7 @@ const getStatusBadge = (status: string) => {
                             <Link
                                 :href="`/websites/${website.id}/pages/${page.id}/builder`"
                                 title="Open Page Builder"
+                                :aria-label="`Open Page Builder for ${page.title}`"
                             >
                                 <LayoutTemplate class="h-3.5 w-3.5" />
                                 <span class="hidden sm:inline">Builder</span>
@@ -461,6 +463,8 @@ const getStatusBadge = (status: string) => {
                         >
                             <Link
                                 :href="`/websites/${website.id}/pages/${page.id}/edit`"
+                                title="Page Settings"
+                                :aria-label="`Page Settings for ${page.title}`"
                             >
                                 <Edit3 class="h-4 w-4" />
                             </Link>
@@ -473,6 +477,7 @@ const getStatusBadge = (status: string) => {
                             size="icon"
                             class="text-amber-600 hover:bg-amber-500/10 dark:text-amber-400"
                             title="Unpublish page"
+                            :aria-label="`Unpublish ${page.title}`"
                             data-testid="unpublish-page-btn"
                             @click="unpublishPage(page.id, page.title)"
                         >
@@ -496,6 +501,8 @@ const getStatusBadge = (status: string) => {
                                 variant="ghost"
                                 size="icon"
                                 class="text-destructive hover:bg-destructive/10"
+                                :title="`Delete ${page.title}`"
+                                :aria-label="`Delete ${page.title}`"
                                 @click="deletePage(page.id, page.title)"
                             >
                                 <Trash2 class="h-4 w-4" />
