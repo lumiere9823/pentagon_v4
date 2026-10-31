@@ -2,15 +2,22 @@
 
 namespace App\Domains\Publishing\Services;
 
+use App\Domains\Publishing\Exceptions\PublishConcurrencyException;
+use Closure;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
-use RuntimeException;
+use Throwable;
 
 /**
  * Domain service enforcing page-level publishing serialization (D-032).
  *
- * Prevents concurrent publishing operations on the same page using PostgreSQL
- * transaction-scoped advisory locks with namespace tag 0x505542 ('PUB').
+ * Prevents concurrent public-state operations on the same page using a
+ * PostgreSQL session advisory lock with namespace tag 0x505542 ('PUB').
+ *
+ * The session lock deliberately spans render and filesystem I/O without
+ * holding an open database transaction. The lock is always released in a
+ * finally block and is scoped to the selected database connection.
  */
 class PagePublishingLock
 {
@@ -46,27 +53,49 @@ class PagePublishingLock
     }
 
     /**
-     * Attempt to acquire a non-blocking transaction-scoped advisory lock for publishing a page.
+     * Run a complete page public-state operation under a non-blocking lock.
      *
-     * Returns true if lock was acquired (or driver is non-pgsql), false if locked by another transaction.
+     * @template TResult
      *
-     * @throws RuntimeException If not within an active database transaction on pgsql.
+     * @param  Closure(): TResult  $operation
+     * @return TResult
+     *
+     * @throws PublishConcurrencyException
      */
-    public function tryLockPage(int $pageId, ?string $connection = null): bool
+    public function runExclusive(int $pageId, Closure $operation, ?string $connection = null): mixed
     {
         $conn = DB::connection($connection);
 
         if (! $this->isDriverSupported($connection)) {
-            return true;
-        }
-
-        if ($conn->transactionLevel() <= 0) {
-            throw new RuntimeException('PagePublishingLock requires an active database transaction. Transaction-scoped locks cannot be held outside a transaction.');
+            return $operation();
         }
 
         $key = $this->generateLockKey($pageId);
-        $result = $conn->selectOne('SELECT pg_try_advisory_xact_lock(?) AS acquired', [$key]);
+        $result = $conn->selectOne('SELECT pg_try_advisory_lock(?) AS acquired', [$key]);
 
-        return (bool) ($result->acquired ?? false);
+        if (! (bool) ($result->acquired ?? false)) {
+            throw new PublishConcurrencyException('Another public-state operation is already in progress for this page.');
+        }
+
+        try {
+            return $operation();
+        } finally {
+            try {
+                $released = $conn->selectOne('SELECT pg_advisory_unlock(?) AS released', [$key]);
+
+                if (! (bool) ($released->released ?? false)) {
+                    Log::critical('Page publishing advisory lock was not owned during release.', [
+                        'page_id' => $pageId,
+                        'connection' => $connection ?? config('database.default'),
+                    ]);
+                }
+            } catch (Throwable $releaseError) {
+                Log::critical('Page publishing advisory lock release failed.', [
+                    'page_id' => $pageId,
+                    'connection' => $connection ?? config('database.default'),
+                    'exception' => $releaseError,
+                ]);
+            }
+        }
     }
 }

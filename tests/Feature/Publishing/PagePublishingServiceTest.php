@@ -365,4 +365,59 @@ class PagePublishingServiceTest extends TestCase
         // Page published_revision_id points to release 1's revision
         $this->assertEquals($release1->page_revision_id, $page->fresh()->published_revision_id);
     }
+
+    public function test_recompiled_rollback_revalidates_media_and_preserves_current_active_release(): void
+    {
+        $user = User::factory()->create();
+        $website = Website::factory()->create(['owner_id' => $user->id]);
+        $media = MediaAsset::factory()->create([
+            'website_id' => $website->id,
+            'status' => MediaAssetStatus::ACTIVE,
+            'storage_path' => "media/{$website->id}/rollback-image.jpg",
+        ]);
+        $documentWithMedia = [
+            'schemaVersion' => 1,
+            'root' => [
+                'id' => 'rollback_media_root',
+                'type' => 'Section',
+                'props' => ['padding' => 'medium'],
+                'children' => [[
+                    'id' => 'rollback_media_image',
+                    'type' => 'Image',
+                    'props' => [
+                        'src' => "storage/{$media->storage_path}",
+                        'alt' => 'Rollback media',
+                    ],
+                    'children' => [],
+                ]],
+            ],
+        ];
+        $page = Page::factory()->create([
+            'website_id' => $website->id,
+            'created_by' => $user->id,
+            'document_json' => $documentWithMedia,
+            'status' => PageStatus::DRAFT,
+        ]);
+
+        $releaseWithMedia = $this->publishingService->publish($page, $user);
+        $page->update(['document_json' => $this->createValidDocument('Current live release')]);
+        $currentRelease = $this->publishingService->publish($page->fresh(), $user);
+
+        Storage::disk('local')->deleteDirectory($releaseWithMedia->directory_path);
+        $media->update(['status' => MediaAssetStatus::PENDING_DELETION]);
+
+        try {
+            $this->publishingService->rollbackToRelease($page, $releaseWithMedia, $user);
+            $this->fail('Rollback must fail when referenced media became unavailable after staging.');
+        } catch (MediaUnavailableException) {
+            $this->assertSame(PageReleaseStatus::ACTIVE, $currentRelease->fresh()->status);
+            $this->assertSame(PageReleaseStatus::SUPERSEDED, $releaseWithMedia->fresh()->status);
+            $this->assertSame($currentRelease->page_revision_id, $page->fresh()->published_revision_id);
+            $this->assertDatabaseHas('page_releases', [
+                'page_id' => $page->id,
+                'page_revision_id' => $releaseWithMedia->page_revision_id,
+                'status' => PageReleaseStatus::FAILED->value,
+            ]);
+        }
+    }
 }

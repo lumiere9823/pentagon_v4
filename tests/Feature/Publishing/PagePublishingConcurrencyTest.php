@@ -4,6 +4,7 @@ namespace Tests\Feature\Publishing;
 
 use App\Domains\Media\Services\MediaUsageScanner;
 use App\Domains\Publishing\Exceptions\MediaUnavailableException;
+use App\Domains\Publishing\Exceptions\PublishConcurrencyException;
 use App\Domains\Publishing\Services\PagePublishingLock;
 use App\Domains\Publishing\Services\PagePublishingService;
 use App\Enums\MediaAssetStatus;
@@ -156,35 +157,51 @@ class PagePublishingConcurrencyTest extends TestCase
     }
 
     /**
-     * Scenario 1: Per-page publish serialization via PostgreSQL transaction advisory lock (D-032).
+     * Scenario 1: The page operation lock spans the entire callback, including
+     * render/filesystem work performed outside database transactions.
      */
-    public function test_concurrent_publish_serialized_via_postgresql_advisory_lock(): void
+    public function test_public_state_operation_lock_spans_callback_and_releases_after_completion(): void
     {
         [$website, $page, $user] = $this->createFixtures();
         $lockService = app(PagePublishingLock::class);
 
-        $conn1 = DB::connection('pgsql');
-        $conn2 = DB::connection('pgsql_worker_2');
+        $result = $lockService->runExclusive($page->id, function () use ($lockService, $page): string {
+            try {
+                $lockService->runExclusive($page->id, fn (): string => 'unexpected', 'pgsql_worker_2');
+                $this->fail('A concurrent operation should be rejected while the callback is running.');
+            } catch (PublishConcurrencyException) {
+                $this->assertTrue(true);
+            }
 
-        // Worker 1 starts publishing and acquires advisory lock
-        $conn1->beginTransaction();
-        $acquired1 = $lockService->tryLockPage($page->id, 'pgsql');
-        $this->assertTrue($acquired1, 'Worker 1 should acquire publish advisory lock');
+            return 'completed';
+        }, 'pgsql');
 
-        // Worker 2 attempts concurrent publish on same page
-        $conn2->beginTransaction();
-        $acquired2 = $lockService->tryLockPage($page->id, 'pgsql_worker_2');
-        $this->assertFalse($acquired2, 'Worker 2 should be rejected non-blockingly while Worker 1 holds lock');
-        $conn2->rollBack();
+        $this->assertSame('completed', $result);
+        $this->assertSame(
+            'next operation',
+            $lockService->runExclusive($page->id, fn (): string => 'next operation', 'pgsql_worker_2'),
+            'The session lock must be released when the callback completes.',
+        );
+    }
 
-        // Worker 1 finishes and commits
-        $conn1->commit();
+    public function test_public_state_operation_lock_releases_after_callback_failure(): void
+    {
+        [$website, $page, $user] = $this->createFixtures();
+        $lockService = app(PagePublishingLock::class);
 
-        // Worker 2 can now acquire lock
-        $conn2->beginTransaction();
-        $acquired2After = $lockService->tryLockPage($page->id, 'pgsql_worker_2');
-        $this->assertTrue($acquired2After, 'Worker 2 should acquire lock after Worker 1 committed');
-        $conn2->rollBack();
+        try {
+            $lockService->runExclusive($page->id, function (): never {
+                throw new \RuntimeException('simulated operation failure');
+            }, 'pgsql');
+            $this->fail('The simulated failure should escape the callback.');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('simulated operation failure', $e->getMessage());
+        }
+
+        $this->assertSame(
+            'recovered',
+            $lockService->runExclusive($page->id, fn (): string => 'recovered', 'pgsql_worker_2'),
+        );
     }
 
     /**

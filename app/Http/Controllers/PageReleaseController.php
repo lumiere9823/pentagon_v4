@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Domains\Publishing\Exceptions\PublishConcurrencyException;
 use App\Domains\Publishing\Services\PagePublishingService;
 use App\Models\Page;
 use App\Models\PageRelease;
@@ -71,6 +72,12 @@ class PageReleaseController extends Controller
                 'recompiled' => $result['recompiled'],
                 'release' => $result['release'],
             ]);
+        } catch (PublishConcurrencyException $e) {
+            return response()->json([
+                'success' => false,
+                'error' => 'publish_in_progress',
+                'message' => $e->getMessage(),
+            ], 409);
         } catch (Throwable $e) {
             return response()->json([
                 'success' => false,

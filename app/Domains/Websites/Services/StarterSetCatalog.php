@@ -2,6 +2,7 @@
 
 namespace App\Domains\Websites\Services;
 
+use App\Domains\DocumentEngine\DocumentLimits;
 use App\Domains\DocumentEngine\Validation\DocumentValidator;
 use InvalidArgumentException;
 use RuntimeException;
@@ -45,7 +46,7 @@ class StarterSetCatalog
     public function getCanonicalHomeDefinition(): array
     {
         $homeDoc = [
-            'schemaVersion' => 1,
+            'schemaVersion' => DocumentLimits::CURRENT_SCHEMA_VERSION,
             'root' => [
                 'id' => 'sec_starter_home',
                 'type' => 'Section',
@@ -111,7 +112,7 @@ class StarterSetCatalog
     protected function getDefaultStarterSet(): array
     {
         $aboutDoc = [
-            'schemaVersion' => 1,
+            'schemaVersion' => DocumentLimits::CURRENT_SCHEMA_VERSION,
             'root' => [
                 'id' => 'sec_starter_about',
                 'type' => 'Section',
@@ -155,7 +156,7 @@ class StarterSetCatalog
         ];
 
         $contactDoc = [
-            'schemaVersion' => 1,
+            'schemaVersion' => DocumentLimits::CURRENT_SCHEMA_VERSION,
             'root' => [
                 'id' => 'sec_starter_contact',
                 'type' => 'Section',

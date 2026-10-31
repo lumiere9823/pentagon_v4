@@ -2,6 +2,7 @@
 
 namespace App\Domains\Publishing\Services;
 
+use App\Domains\DocumentEngine\DocumentLimits;
 use App\Domains\DocumentEngine\Validation\DocumentValidator;
 use App\Domains\Media\Services\MediaConcurrencyLock;
 use App\Domains\Media\Services\MediaUsageScanner;
@@ -11,6 +12,7 @@ use App\Domains\Publishing\Exceptions\PublishFailedException;
 use App\Domains\Publishing\Exceptions\PublishValidationException;
 use App\Enums\MediaAssetStatus;
 use App\Enums\PageReleaseStatus;
+use App\Enums\PageStatus;
 use App\Models\MediaAsset;
 use App\Models\Page;
 use App\Models\PageRelease;
@@ -45,14 +47,17 @@ class PagePublishingService
      */
     public function publish(Page $page, ?User $user = null, ?string $disk = 'local'): PageRelease
     {
+        return $this->publishingLock->runExclusive(
+            (int) $page->id,
+            fn (): PageRelease => $this->performPublish($page, $user, $disk),
+        );
+    }
+
+    private function performPublish(Page $page, ?User $user, ?string $disk): PageRelease
+    {
         // Phase 1: Pre-flight snapshot & media verification (Short DB Transaction <10ms)
         /** @var array{release: PageRelease, target_revision: PageRevision} $preflight */
         $preflight = DB::transaction(function () use ($page, $user) {
-            $locked = $this->publishingLock->tryLockPage($page->id);
-            if (! $locked) {
-                throw new PublishConcurrencyException('Publishing is already in progress for this page.');
-            }
-
             /** @var Page $lockedPage */
             $lockedPage = Page::where('id', $page->id)->lockForUpdate()->firstOrFail();
 
@@ -102,7 +107,7 @@ class PagePublishingService
                 $targetRev = PageRevision::create([
                     'page_id' => $lockedPage->id,
                     'revision_number' => $nextRevNum,
-                    'schema_version' => 1,
+                    'schema_version' => DocumentLimits::CURRENT_SCHEMA_VERSION,
                     'document_json' => $canonicalDocument,
                     'document_hash' => $docHash,
                     'change_summary' => 'Published release',
@@ -111,31 +116,8 @@ class PagePublishingService
                 ]);
             }
 
-            // D-023 Advisory Lock scoping for referenced media
             $website = $lockedPage->website ?? Website::findOrFail($lockedPage->website_id);
-            $inspection = $this->mediaScanner->inspectAssetReferences($canonicalDocument, $website);
-
-            if ($inspection['indeterminate'] || $inspection['has_foreign_media'] || ! empty($inspection['unresolved_media_paths'])) {
-                throw new MediaUnavailableException('One or more media assets referenced in this document are unavailable or foreign.');
-            }
-
-            $assetIds = array_values(array_unique(array_map('intval', $inspection['asset_ids'])));
-            if (! empty($assetIds)) {
-                sort($assetIds, SORT_NUMERIC);
-                $this->mediaLock->lockAssets($assetIds);
-
-                $activeAssets = MediaAsset::where('website_id', $website->id)
-                    ->whereIn('id', $assetIds)
-                    ->where('status', MediaAssetStatus::ACTIVE)
-                    ->whereNull('deleted_at')
-                    ->lockForUpdate()
-                    ->pluck('id')
-                    ->all();
-
-                if (count($activeAssets) !== count($assetIds)) {
-                    throw new MediaUnavailableException('One or more referenced media assets are unavailable or deleted.');
-                }
-            }
+            $this->assertDocumentMediaAvailable($canonicalDocument, $website);
 
             // Create unsealed candidate release in PENDING state
             $candidate = $this->stagingService->createCandidate($targetRev, $user);
@@ -158,29 +140,31 @@ class PagePublishingService
         }
 
         // Phase 3: Database Atomic Activation (Short TX <5ms)
-        DB::transaction(function () use ($page, $sealedRelease, $targetRevision) {
-            /** @var Page $lockedPage */
-            $lockedPage = Page::where('id', $page->id)->lockForUpdate()->firstOrFail();
-
-            // Transition previous active release to superseded
-            PageRelease::where('page_id', $lockedPage->id)
-                ->where('status', PageReleaseStatus::ACTIVE)
-                ->update(['status' => PageReleaseStatus::SUPERSEDED]);
-
-            // Activate sealed release
-            $sealedRelease->update([
-                'status' => PageReleaseStatus::ACTIVE,
-                'activated_at' => now(),
-            ]);
-
-            // Update page pointers
-            $lockedPage->update([
-                'published_revision_id' => $targetRevision->id,
-                'status' => 'published',
-            ]);
-        });
+        $this->activateRelease($page, $sealedRelease, $targetRevision);
 
         return $sealedRelease->fresh();
+    }
+
+    /**
+     * Take a page offline without racing an in-flight publish or rollback.
+     */
+    public function unpublish(Page $page, ?User $user = null): Page
+    {
+        return $this->publishingLock->runExclusive(
+            (int) $page->id,
+            function () use ($page, $user): Page {
+                return DB::transaction(function () use ($page, $user): Page {
+                    /** @var Page $lockedPage */
+                    $lockedPage = Page::where('id', $page->id)->lockForUpdate()->firstOrFail();
+                    $lockedPage->update([
+                        'status' => PageStatus::DRAFT,
+                        'updated_by' => $user?->id,
+                    ]);
+
+                    return $lockedPage->fresh();
+                });
+            },
+        );
     }
 
     /**
@@ -204,9 +188,32 @@ class PagePublishingService
         ?User $user = null,
         ?string $disk = 'local'
     ): array {
+        return $this->publishingLock->runExclusive(
+            (int) $page->id,
+            fn (): array => $this->performRollback($page, $targetRelease, $user, $disk),
+        );
+    }
+
+    /**
+     * @return array{
+     *     success: bool,
+     *     instant: bool,
+     *     recompiled: bool,
+     *     release: PageRelease
+     * }
+     */
+    private function performRollback(
+        Page $page,
+        PageRelease $targetRelease,
+        ?User $user,
+        ?string $disk
+    ): array {
         if ((int) $targetRelease->page_id !== (int) $page->id) {
             throw new PublishFailedException('Target release does not belong to this page.');
         }
+
+        /** @var PageRevision $revision */
+        $revision = $targetRelease->revision ?? PageRevision::findOrFail($targetRelease->page_revision_id);
 
         $storage = Storage::disk($disk ?? 'local');
         $dirPath = $targetRelease->directory_path;
@@ -219,25 +226,7 @@ class PagePublishingService
 
         if ($isVerified) {
             // Case A: Instant pointer switch (<50ms)
-            DB::transaction(function () use ($page, $targetRelease) {
-                /** @var Page $lockedPage */
-                $lockedPage = Page::where('id', $page->id)->lockForUpdate()->firstOrFail();
-
-                PageRelease::where('page_id', $lockedPage->id)
-                    ->where('status', PageReleaseStatus::ACTIVE)
-                    ->update(['status' => PageReleaseStatus::SUPERSEDED]);
-
-                PageRelease::where('id', $targetRelease->id)->update([
-                    'status' => PageReleaseStatus::ACTIVE,
-                    'activated_at' => now(),
-                ]);
-                $targetRelease->refresh();
-
-                $lockedPage->update([
-                    'published_revision_id' => $targetRelease->page_revision_id,
-                    'status' => 'published',
-                ]);
-            });
+            $this->activateRelease($page, $targetRelease, $revision);
 
             return [
                 'success' => true,
@@ -248,28 +237,18 @@ class PagePublishingService
         }
 
         // Case B: Re-render fallback from immutable PageRevision
-        /** @var PageRevision $revision */
-        $revision = $targetRelease->revision ?? PageRevision::findOrFail($targetRelease->page_revision_id);
         $newRelease = $this->stagingService->stageRevision($revision, $user, $disk);
 
-        DB::transaction(function () use ($page, $newRelease, $revision) {
-            /** @var Page $lockedPage */
-            $lockedPage = Page::where('id', $page->id)->lockForUpdate()->firstOrFail();
-
-            PageRelease::where('page_id', $lockedPage->id)
-                ->where('status', PageReleaseStatus::ACTIVE)
-                ->update(['status' => PageReleaseStatus::SUPERSEDED]);
-
+        try {
+            $this->activateRelease($page, $newRelease, $revision);
+        } catch (Throwable $e) {
             $newRelease->update([
-                'status' => PageReleaseStatus::ACTIVE,
-                'activated_at' => now(),
+                'status' => PageReleaseStatus::FAILED,
+                'error_message' => substr($e->getMessage(), 0, 1000),
             ]);
 
-            $lockedPage->update([
-                'published_revision_id' => $revision->id,
-                'status' => 'published',
-            ]);
-        });
+            throw $e;
+        }
 
         return [
             'success' => true,
@@ -277,5 +256,72 @@ class PagePublishingService
             'recompiled' => true,
             'release' => $newRelease->fresh(),
         ];
+    }
+
+    /**
+     * Validate and lock every local media reference immediately before a
+     * persistence or activation decision. Must run inside a DB transaction.
+     *
+     * @param  array<string, mixed>  $document
+     */
+    private function assertDocumentMediaAvailable(array $document, Website $website): void
+    {
+        $inspection = $this->mediaScanner->inspectAssetReferences($document, $website);
+
+        if ($inspection['indeterminate'] || $inspection['has_foreign_media'] || ! empty($inspection['unresolved_media_paths'])) {
+            throw new MediaUnavailableException('One or more media assets referenced in this document are unavailable or foreign.');
+        }
+
+        $assetIds = array_values(array_unique(array_map('intval', $inspection['asset_ids'])));
+        if (empty($assetIds)) {
+            return;
+        }
+
+        sort($assetIds, SORT_NUMERIC);
+        $this->mediaLock->lockAssets($assetIds);
+
+        $activeAssets = MediaAsset::where('website_id', $website->id)
+            ->whereIn('id', $assetIds)
+            ->where('status', MediaAssetStatus::ACTIVE)
+            ->whereNull('deleted_at')
+            ->lockForUpdate()
+            ->pluck('id')
+            ->all();
+
+        if (count($activeAssets) !== count($assetIds)) {
+            throw new MediaUnavailableException('One or more referenced media assets are unavailable or deleted.');
+        }
+    }
+
+    /**
+     * Atomically revalidate the immutable revision and switch the public pointer.
+     * This is the single implementation for publish and both rollback paths.
+     */
+    private function activateRelease(Page $page, PageRelease $release, PageRevision $revision): void
+    {
+        DB::transaction(function () use ($page, $release, $revision): void {
+            /** @var Page $lockedPage */
+            $lockedPage = Page::where('id', $page->id)->lockForUpdate()->firstOrFail();
+            $website = $lockedPage->website ?? Website::findOrFail($lockedPage->website_id);
+
+            $this->assertDocumentMediaAvailable($revision->document_json, $website);
+
+            PageRelease::where('page_id', $lockedPage->id)
+                ->where('status', PageReleaseStatus::ACTIVE)
+                ->where('id', '!=', $release->id)
+                ->update(['status' => PageReleaseStatus::SUPERSEDED]);
+
+            PageRelease::where('id', $release->id)
+                ->where('page_id', $lockedPage->id)
+                ->update([
+                    'status' => PageReleaseStatus::ACTIVE,
+                    'activated_at' => now(),
+                ]);
+
+            $lockedPage->update([
+                'published_revision_id' => $revision->id,
+                'status' => PageStatus::PUBLISHED,
+            ]);
+        });
     }
 }

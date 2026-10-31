@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Domains\DocumentEngine\DocumentLimits;
 use App\Enums\PageReleaseStatus;
 use Database\Factories\PageReleaseFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -71,7 +72,7 @@ class PageRelease extends Model
      */
     protected $attributes = [
         'status' => PageReleaseStatus::PENDING,
-        'schema_version' => 1,
+        'schema_version' => DocumentLimits::CURRENT_SCHEMA_VERSION,
         'renderer_version' => 1,
     ];
 

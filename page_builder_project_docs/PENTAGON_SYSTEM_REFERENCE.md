@@ -161,9 +161,10 @@ PUT /content {document_json, lock_version, is_autosave, seo_metadata}
 Preview (auth) hoặc share link có chữ ký 60 phút ──► render previewMode (lỗi node → placeholder)
    ▼
 POST /publish
-   │  Phase 1 (tx ngắn): PUB lock, validate, tái dùng/tạo revision, MED locks, tạo release PENDING
+   │  PUB session lock bao toàn operation (không giữ DB transaction khi render/I/O)
+   │  Phase 1 (tx ngắn): validate, tái dùng/tạo revision, MED locks, tạo release PENDING
    │  Phase 2 (không tx): render HTML → staging_{uuid}/ → manifest → verify → rename r_{n}_{hash8}/
-   │  Phase 3 (tx ngắn): ACTIVE cũ → SUPERSEDED, release mới → ACTIVE, page.published_revision_id
+   │  Phase 3 (tx ngắn): revalidate media → ACTIVE cũ → SUPERSEDED → release mới ACTIVE
    ▼
 GET /sites/{website}/{page} → đọc index.html, ETag = html_hash, 304 nếu khớp
    ▼
@@ -234,6 +235,7 @@ Kiểu TypeScript tương ứng nằm ở `resources/js/types/document.ts`: `Doc
 | `MAX_SHORT_STRING_LENGTH` | 500 | maxLength mặc định cho chuỗi không khai báo riêng |
 | `MAX_URL_LENGTH` | 2 048 | Prop URL |
 | `NODE_ID_REGEX` | `/^[a-zA-Z0-9_-]{3,64}$/` | Định dạng ID |
+| `CURRENT_SCHEMA_VERSION` | `1` | Schema canonical do writer phát ra |
 | `SUPPORTED_SCHEMA_VERSIONS` | `[1]` | Chỉ có schema v1 |
 
 Các giới hạn này được công bố qua `GET /api/components/registry` (route `api.components.registry`).
@@ -261,7 +263,10 @@ API phụ của `ValidationResult`: `isValid()`, `getErrors()`, `getErrorsArray(
 
 `DocumentValidator::createEmptyDocument($title = 'New Page')` tạo **tài liệu rỗng chuẩn**: root `Section#root_section_default` chứa `Container#node_container_default`. Phía client, `createDefaultDocument()` sinh cấu trúc giống hệt.
 
-> ⚠️ **Lưu ý quan trọng:** `PagePersistenceService` và `PageTemplateController` lưu **document gốc của request**, không lưu `getSanitizedDocument()`. Validator đóng vai trò "cổng chặn", còn kết quả chuẩn hoá (điền default, chuẩn hoá alias, sanitize HTML) không được lưu xuống DB. Trang public vẫn an toàn vì renderer escape và sanitize lại khi render. Xem [§21](#21-hạn-chế-đã-biết-và-khoảng-trống).
+`PagePersistenceService` và `PageTemplateController` lưu `getSanitizedDocument()`:
+alias được chuẩn hoá, default được điền và HTML được sanitize trước khi ghi. Renderer
+vẫn validate/sanitize lại theo nguyên tắc phòng thủ nhiều lớp. Historical revision và
+sealed release cũ không bị rewrite.
 
 ### 3.4 Validate props (`ComponentDefinition::validateProps`)
 
@@ -298,12 +303,16 @@ Phía client có bộ sanitize song song là `resources/js/lib/domSanitizer.ts` 
 
 ### 3.6 Versioning schema
 
-Hiện **chưa có pipeline migration schema**. `SUPPORTED_SCHEMA_VERSIONS = [1]`, mọi writer vẫn ghi `schema_version = 1`. Release cũ dùng `renderer_version = 1`; release tạo từ Phase 2B dùng `renderer_version = 2` để đánh dấu responsive rendering/publish preflight mới. Không có migration hoặc sửa release cũ.
+`DocumentSchemaMigrator::migrateToCurrent()` là seam migration tuần tự và fail-closed.
+`CURRENT_SCHEMA_VERSION = 1`, `SUPPORTED_SCHEMA_VERSIONS = [1]`; mọi backend writer
+dùng current-version constant. Vì chưa có semantics schema v2, production path hiện là
+identity migration idempotent cho v1; future version bị từ chối. Release cũ dùng
+`renderer_version = 1`; release mới dùng `renderer_version = 2`. Không rewrite release cũ.
 
 Khi cần v2, phải:
 
 1. Thêm version vào danh sách hỗ trợ.
-2. Viết migrator v1 → v2 chạy khi đọc (hoặc backfill).
+2. Thêm bước private v1 → v2 vào `DocumentSchemaMigrator` và fixture before/after.
 3. Version hoá renderer.
 4. Thêm fixture cho tài liệu cũ.
 
@@ -1230,17 +1239,25 @@ releases:prune-superseded  → SUPERSEDED cũ → PRUNED (xoá thư mục)
 
 **Phase 1 — Pre-flight (transaction ngắn, khoảng dưới 10 ms):**
 
-1. `PagePublishingLock::tryLockPage` = `pg_try_advisory_xact_lock((0x505542 << 40) | page_id)` (namespace `'PUB'`). Không lấy được → `PublishConcurrencyException` → **409 `publish_in_progress`**.
+1. `PagePublishingLock::runExclusive()` đã lấy session lock
+   `pg_try_advisory_lock((0x505542 << 40) | page_id)` trước khi vào Phase 1. Không lấy
+   được → `PublishConcurrencyException` → **409 `publish_in_progress`**.
 2. Khoá row page `FOR UPDATE`. `document_json` null → lỗi.
 3. `validateForPublishing()` validate schema rồi chạy semantic preflight. Image `src` rỗng/whitespace → 422 `validation_failed`, `details[]` có node path; draft save và preview vẫn có thể giữ placeholder Image rỗng.
 4. Tính hash chuẩn. Nếu trùng revision mới nhất → **tái dùng** revision đó (idempotent). Nếu khác → tạo revision N+1 "Published release".
 5. `inspectAssetReferences` trên revision đích → MED lock asset ID (tăng dần) → mọi asset phải `ACTIVE`, chưa xoá mềm, đúng website. Nếu không → `MediaUnavailableException` (422).
 6. `ReleaseStagingService::createCandidate()` → release `PENDING`, `release_number = max+1` (dưới khoá row page).
-7. Commit, giải phóng mọi advisory lock.
+7. Commit, giải phóng MED transaction locks; PUB session lock vẫn giữ đến hết operation.
 
-**Phase 2 — Render và niêm phong (không giữ transaction hay lock nào):** `stageAndSeal()` (§10.3). Media vẫn an toàn vì revision đích đã tồn tại trong `page_revisions`, nơi scanner coi là nguồn tham chiếu (D-030/D-034).
+**Phase 2 — Render và niêm phong (không giữ DB transaction):** `stageAndSeal()` (§10.3).
+PUB session lock vẫn serialize publish/rollback/unpublish trên page nhưng không chiếm
+transaction. Media revision vẫn được scanner bảo vệ (D-030/D-034).
 
 **Phase 3 — Kích hoạt (transaction ngắn, khoảng dưới 5 ms):**
+
+`activateRelease()` khoá row page, lấy MED locks và tái kiểm tra mọi media trong immutable
+revision ngay trước pointer switch. Cả publish, rollback tức thì và rollback recompile dùng
+cùng implementation này.
 
 ```sql
 -- dưới FOR UPDATE của row page
@@ -1253,7 +1270,9 @@ UPDATE pages SET published_revision_id=?, status='published' WHERE id=?;
 
 - Release đang ACTIVE **không bao giờ bị mất** khi publish lỗi ở bất kỳ bước nào, vì nó chỉ bị đụng tới ở Phase 3 (D-042).
 - Tối đa 1 release ACTIVE trên mỗi page, do index DB đảm bảo.
-- Không giữ lock trong lúc render hay ghi đĩa, nên không gây nghẽn connection pool.
+- Không giữ DB transaction, row lock hoặc MED lock trong lúc render/ghi đĩa; chỉ giữ
+  PUB session lock trên connection để serialize operation.
+- PUB session lock luôn được nhả trong `finally`, kể cả callback ném exception.
 
 **Ánh xạ lỗi (`PagePublishingController`):**
 
@@ -1568,7 +1587,7 @@ Ngoài ra có các bảng chuẩn của framework: `users` (có cột 2FA), `pas
 | Row lock | `SELECT … FOR UPDATE` | Page, template, asset, revision mới nhất | Tuần tự hoá ghi trên cùng một bản ghi |
 | Row lock | `Website::where(...)->lockForUpdate()` | `PUT /websites/{w}/homepage` | Tuần tự hoá gán homepage đồng thời trên cùng website |
 | **MED advisory lock** (D-023) | `pg_advisory_xact_lock((0x4D4544 << 40) \| asset_id)` | Mọi writer có tham chiếu media + delete + pruner | Loại trừ lẫn nhau giữa ghi tài liệu và dọn media |
-| **PUB advisory lock** (D-032) | `pg_try_advisory_xact_lock((0x505542 << 40) \| page_id)` | Phase 1 của publish | Chặn publish đồng thời trên cùng page |
+| **PUB advisory lock** (D-032) | `pg_try_advisory_lock((0x505542 << 40) \| page_id)` | Toàn publish/rollback/unpublish | Serialize public-state operation mà không giữ transaction lúc render |
 | Partial unique index | `page_releases (page_id) WHERE status='active'` | Phase 3 / rollback | Đảm bảo tối đa 1 release ACTIVE |
 | Partial unique index | `pages (website_id) WHERE is_homepage=true` | DB schema / HomepageManager | Đảm bảo tối đa 1 homepage trên mỗi website |
 | Rename nguyên tử | `rename(staging → r_n_hash8)` | Staging | Không bao giờ có thư mục release ghi dở |
@@ -1596,7 +1615,10 @@ Key 64-bit = 24 bit namespace (`'MED'`, `'PUB'` dạng ASCII) cộng 40 bit ID (
 
 **Writer xen kẽ với pruner:** nếu writer đang chờ lock của một asset mà pruner đang xoá, sau khi pruner commit, writer đọc lại thì không còn row → 422. Bất biến 1 luôn được giữ.
 
-**Môi trường test:** trên SQLite, `MediaConcurrencyLock` ghi warning và **bỏ qua lock** (chỉ ở env `testing`; ở env khác sẽ ném lỗi), còn `PagePublishingLock` luôn trả true. Vì vậy 26 test concurrency chỉ chạy được trên PostgreSQL (`phpunit.pgsql.xml`).
+**Môi trường test:** trên SQLite, `MediaConcurrencyLock` ghi warning và **bỏ qua lock**
+(chỉ ở env `testing`; ở env khác sẽ ném lỗi), còn `PagePublishingLock::runExclusive()`
+chạy callback trực tiếp. Mutual exclusion và release-after-failure được kiểm chứng trên
+PostgreSQL (`phpunit.pgsql.xml`).
 
 ---
 
@@ -1909,14 +1931,14 @@ Các mục dưới đây được xác minh bằng cách đọc code. Mức đ�
 | 4 | ✅ | *Đã sửa Phase 2B:* banner được chèn qua `bodyPrefixHtml` bên trong body; DOCTYPE vẫn đứng đầu | `PagePreviewController`, `DocumentHtmlRenderer` |
 | 5 | ✅ | *Đã sửa Phase 2B:* publish preflight trả 422 `validation_failed` với `empty_image_source` và node path; preview placeholder vẫn giữ | `DocumentValidator::validateForPublishing` |
 | 6 | ✅ | *Đã sửa Phase 2A:* publish dừng khi save thất bại/conflict/exception và không gửi POST publish | `EditorShell.vue`, `publishGuard.ts` |
-| 7 | 🟡 | PUB lock chỉ bao Phase 1. Phase 3 dựa vào row lock và partial unique (thực chất là last-writer-wins). Rollback release không lấy PUB lock và không kiểm tra lại media trước khi biên dịch lại (Case B) | `PagePublishingService` |
+| 7 | ✅ | *Đã sửa Phase E.1:* PUB session lock bao toàn publish/rollback/unpublish; activation dùng chung implementation và tái kiểm tra media trước pointer switch; callback lỗi luôn nhả lock | `PagePublishingLock`, `PagePublishingService` |
 | 8 | 🟡 | Class `prose` được dùng nhưng `@tailwindcss/typography` không có trong dependency | RichText/FAQ |
 
 ### 21.2 Dữ liệu / bảo mật
 
 | # | Mức | Vấn đề | Vị trí |
 |---|---|---|---|
-| 9 | 🟠 | Bản tài liệu đã sanitize bị bỏ: draft và template lưu JSON gốc (không điền default, không chuẩn hoá alias, HTML chưa sanitize lúc lưu). Đầu ra public vẫn an toàn nhờ sanitize lúc render | `PagePersistenceService`, `PageTemplateController` |
+| 9 | ✅ | Draft và template lưu canonical sanitized document; test bao alias normalization, defaults, HTML sanitization và hash dedup | `PagePersistenceService`, `PageTemplateController` |
 | 10 | ✅ | *Đã sửa Phase 2A:* Viewer chỉ đọc; Owner/Editor mới được sửa/xoá submission; cross-tenant giữ 404 | `FormSubmissionAdminController`, `WebsitePolicy` |
 | 11 | 🟡 | Xoá website/page không dọn file media và thư mục release. Thư mục đã niêm phong của release FAILED cũng không bị lệnh nào dọn | Cascade + `releases:reconcile` |
 | 12 | 🟡 | Nginx vẫn ánh xạ MIME `svg` trong `/storage/media/` dù SVG bị cấm upload (vô hại, nhưng không nhất quán) | `deploy/nginx/pentagon.conf` |

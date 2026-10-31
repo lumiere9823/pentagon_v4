@@ -9,7 +9,6 @@ use App\Domains\Publishing\Exceptions\PublishRenderingException;
 use App\Domains\Publishing\Exceptions\PublishValidationException;
 use App\Domains\Publishing\Exceptions\ReleaseStagingException;
 use App\Domains\Publishing\Services\PagePublishingService;
-use App\Enums\PageStatus;
 use App\Models\Page;
 use App\Models\Website;
 use Illuminate\Http\JsonResponse;
@@ -100,10 +99,15 @@ class PagePublishingController extends Controller
 
         Gate::authorize('update', $page);
 
-        $page->update([
-            'status' => PageStatus::DRAFT,
-            'updated_by' => $request->user()?->id,
-        ]);
+        try {
+            $page = $this->publishingService->unpublish($page, $request->user());
+        } catch (PublishConcurrencyException $e) {
+            return response()->json([
+                'success' => false,
+                'error' => 'publish_in_progress',
+                'message' => $e->getMessage(),
+            ], 409);
+        }
 
         if (! $request->wantsJson()) {
             return redirect()->back()->with('success', 'Page unpublished successfully. Public URL is now offline.');
@@ -112,7 +116,7 @@ class PagePublishingController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Page unpublished successfully. Public URL is now offline.',
-            'status' => PageStatus::DRAFT->value,
+            'status' => $page->status->value,
         ]);
     }
 }

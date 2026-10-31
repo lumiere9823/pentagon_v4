@@ -3,6 +3,7 @@
 namespace App\Domains\DocumentEngine\Validation;
 
 use App\Domains\DocumentEngine\DocumentLimits;
+use App\Domains\DocumentEngine\Migration\DocumentSchemaMigrator;
 use App\Domains\DocumentEngine\Registry\ComponentRegistry;
 use App\Domains\DocumentEngine\Sanitization\HtmlSanitizer;
 use App\Domains\DocumentEngine\Schema\ComponentDefinition;
@@ -14,12 +15,16 @@ class DocumentValidator
 
     private HtmlSanitizer $sanitizer;
 
+    private DocumentSchemaMigrator $migrator;
+
     public function __construct(
         ?ComponentRegistry $registry = null,
         ?HtmlSanitizer $sanitizer = null,
+        ?DocumentSchemaMigrator $migrator = null,
     ) {
         $this->registry = $registry ?? new ComponentRegistry;
         $this->sanitizer = $sanitizer ?? new HtmlSanitizer;
+        $this->migrator = $migrator ?? new DocumentSchemaMigrator;
     }
 
     /**
@@ -103,6 +108,10 @@ class DocumentValidator
                 code: 'unsupported_schema_version',
                 message: "Schema version '{$decoded['schemaVersion']}' is not supported. Supported versions: [{$supported}]."
             );
+        }
+
+        if (empty($errors)) {
+            $decoded = $this->migrator->migrateToCurrent($decoded);
         }
 
         // 3. Validate root node existence
@@ -609,7 +618,7 @@ class DocumentValidator
     public static function createEmptyDocument(string $title = 'New Page'): array
     {
         return [
-            'schemaVersion' => 1,
+            'schemaVersion' => DocumentLimits::CURRENT_SCHEMA_VERSION,
             'root' => [
                 'id' => 'root_section_default',
                 'type' => 'Section',
