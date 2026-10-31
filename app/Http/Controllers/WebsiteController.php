@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Domains\Websites\Contracts\WebsiteProvisionerInterface;
 use App\Enums\WebsiteRole;
 use App\Http\Requests\StoreWebsiteRequest;
 use App\Http\Requests\UpdateWebsiteRequest;
@@ -11,7 +12,6 @@ use App\Models\Website;
 use Illuminate\Database\Eloquent\Relations\Pivot;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -52,26 +52,14 @@ class WebsiteController extends Controller
         return Inertia::render('Websites/Create');
     }
 
-    public function store(StoreWebsiteRequest $request): RedirectResponse
-    {
-        $user = $request->user();
-
-        $website = DB::transaction(function () use ($request, $user) {
-            $website = new Website;
-            $website->owner_id = $user->id;
-            $website->name = $request->validated('name');
-            $website->slug = $request->validated('slug');
-            $website->status = 'active';
-            $website->save();
-
-            // Synchronize owner membership invariant
-            $website->memberships()->create([
-                'user_id' => $user->id,
-                'role' => WebsiteRole::OWNER,
-            ]);
-
-            return $website;
-        });
+    public function store(
+        StoreWebsiteRequest $request,
+        WebsiteProvisionerInterface $provisioner,
+    ): RedirectResponse {
+        $website = $provisioner->provision(
+            $request->user(),
+            $request->validated(),
+        );
 
         return redirect()->route('websites.show', $website)
             ->with('success', 'Website created successfully.');

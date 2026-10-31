@@ -78,6 +78,26 @@ class WebsiteManagementTest extends TestCase
         $this->assertNotNull($membership);
         $this->assertEquals(WebsiteRole::OWNER, $membership->role);
 
+        // Check starter pages invariant
+        $this->assertDatabaseHas('pages', [
+            'website_id' => $website->id,
+            'title' => 'Home',
+            'slug' => 'home',
+            'is_homepage' => true,
+        ]);
+        $this->assertDatabaseHas('pages', [
+            'website_id' => $website->id,
+            'title' => 'About',
+            'slug' => 'about',
+            'is_homepage' => false,
+        ]);
+        $this->assertDatabaseHas('pages', [
+            'website_id' => $website->id,
+            'title' => 'Contact',
+            'slug' => 'contact',
+            'is_homepage' => false,
+        ]);
+
         $response->assertRedirect(route('websites.show', $website));
     }
 
