@@ -8,12 +8,14 @@ const props = withDefaults(
         alt?: string;
         caption?: string;
         aspectRatio?: 'auto' | '16:9' | '4:3' | '1:1';
+        presentationStyle?: Record<string, string | number>;
     }>(),
     {
         src: '',
         alt: '',
         caption: '',
         aspectRatio: 'auto',
+        presentationStyle: () => ({}),
     },
 );
 
@@ -53,6 +55,7 @@ const aspectClass = computed(() => {
                 'w-full rounded-lg shadow-xs transition-opacity',
                 aspectClass,
             ]"
+            :style="presentationStyle"
             loading="lazy"
             @error="hasError = true"
             @load="hasError = false"

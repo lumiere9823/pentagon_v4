@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRenderer, type App } from '@vue/runtime-core';
-import { useAutosave, type UseAutosaveOptions } from '@/composables/useAutosave';
+import {
+    useAutosave,
+    type UseAutosaveOptions,
+} from '@/composables/useAutosave';
 import type { DocumentSchema } from '@/types/document';
 
 class MockEventTarget {
@@ -340,6 +343,7 @@ describe('useAutosave Composable (M14)', () => {
         await flushPromises();
 
         expect(autosave.saveStatus.value).toBe('conflict');
+        expect(autosave.isDirty.value).toBe(true);
         expect(autosave.conflictData.value).toEqual({
             current_lock_version: 7,
             updated_at: '2026-10-18T14:30:00Z',
@@ -379,8 +383,17 @@ describe('useAutosave Composable (M14)', () => {
         const result = await autosave.saveNow();
         expect(result).toBe(false);
         expect(autosave.saveStatus.value).toBe('error');
-        expect(autosave.errorMessage.value).toBe('Document depth exceeds limit.');
+        expect(autosave.isDirty.value).toBe(true);
+        expect(autosave.errorMessage.value).toBe(
+            'Document depth exceeds limit.',
+        );
         expect(autosave.lockVersion.value).toBe(1);
+
+        const beforeUnloadEvent = new Event('beforeunload', {
+            cancelable: true,
+        });
+        mockWindow.dispatchEvent(beforeUnloadEvent);
+        expect(beforeUnloadEvent.defaultPrevented).toBe(true);
 
         app.unmount();
     });
@@ -491,7 +504,9 @@ describe('useAutosave Composable (M14)', () => {
         autosave.notifyChange();
 
         // 1. beforeunload warns user
-        const beforeUnloadEvent = new Event('beforeunload', { cancelable: true });
+        const beforeUnloadEvent = new Event('beforeunload', {
+            cancelable: true,
+        });
         window.dispatchEvent(beforeUnloadEvent);
         expect(beforeUnloadEvent.defaultPrevented).toBe(true);
 

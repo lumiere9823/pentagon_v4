@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { MediaAssetItem } from '@/types/media';
+import { requestJson } from '@/lib/httpClient';
 
 const props = withDefaults(
     defineProps<{
@@ -55,16 +56,6 @@ watch(
     { immediate: true },
 );
 
-function getCsrfToken(): string | null {
-    if (typeof document === 'undefined') return null;
-    const meta = document.querySelector('meta[name="csrf-token"]');
-    if (meta) {
-        return meta.getAttribute('content');
-    }
-    const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
-    return match ? decodeURIComponent(match[1]) : null;
-}
-
 async function copyUrlToClipboard() {
     if (!props.asset) return;
     try {
@@ -83,31 +74,20 @@ async function saveAltText() {
 
     isSavingAlt.value = true;
     try {
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-            'X-Requested-With': 'XMLHttpRequest',
-        };
-        const csrf = getCsrfToken();
-        if (csrf) {
-            headers['X-XSRF-TOKEN'] = csrf;
-            headers['X-CSRF-TOKEN'] = csrf;
-        }
-
-        const response = await fetch(
+        const response = await requestJson<any>(
             `/websites/${props.websiteId}/media/${props.asset.id}`,
             {
                 method: 'PUT',
-                headers,
-                body: JSON.stringify({
+                csrf: 'both',
+                requestedWith: true,
+                body: {
                     alt_text: altText.value.trim(),
-                }),
+                },
             },
         );
 
         if (response.ok) {
-            const data = await response.json();
-            emit('updated', data.data);
+            emit('updated', response.data.data);
         }
     } finally {
         isSavingAlt.value = false;
@@ -122,25 +102,16 @@ async function executeDelete() {
     referencingPages.value = [];
 
     try {
-        const headers: Record<string, string> = {
-            Accept: 'application/json',
-            'X-Requested-With': 'XMLHttpRequest',
-        };
-        const csrf = getCsrfToken();
-        if (csrf) {
-            headers['X-XSRF-TOKEN'] = csrf;
-            headers['X-CSRF-TOKEN'] = csrf;
-        }
-
-        const response = await fetch(
+        const response = await requestJson<any>(
             `/websites/${props.websiteId}/media/${props.asset.id}`,
             {
                 method: 'DELETE',
-                headers,
+                csrf: 'both',
+                requestedWith: true,
             },
         );
 
-        const data = await response.json();
+        const data = response.data;
 
         if (!response.ok) {
             if (response.status === 422 && data.error_code === 'media_in_use') {

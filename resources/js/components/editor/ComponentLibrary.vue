@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import {
     AlertCircle,
     Box,
@@ -9,6 +9,8 @@ import {
     Heading,
     HelpCircle,
     Image,
+    Layers,
+    LayoutGrid,
     Minus,
     MousePointerClick,
     MoveVertical,
@@ -35,29 +37,28 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
-import type {
-    ComponentMetadata,
-    ComponentRegistryResponse,
-    CoreComponentType,
-} from '@/types/document';
+import type { ComponentMetadata, CoreComponentType } from '@/types/document';
 
 const props = withDefaults(
     defineProps<{
         readOnly?: boolean;
+        components: ComponentMetadata[];
+        isLoading: boolean;
+        errorMessage: string | null;
+        activeTab?: 'components' | 'layers';
     }>(),
     {
         readOnly: false,
+        activeTab: 'components',
     },
 );
 
 const emit = defineEmits<{
     (e: 'insertComponent', type: CoreComponentType): void;
     (e: 'close'): void;
+    (e: 'retry'): void;
+    (e: 'switchTab', tab: 'components' | 'layers'): void;
 }>();
-
-const components = ref<ComponentMetadata[]>([]);
-const isLoading = ref<boolean>(true);
-const errorMessage = ref<string | null>(null);
 
 const searchQuery = ref<string>('');
 const activeCategory = ref<ComponentCategoryId>('all');
@@ -82,48 +83,9 @@ const getComponentIcon = (type: CoreComponentType) => {
     return iconMap[type] || Box;
 };
 
-// Fetch registry metadata from backend
-const fetchRegistry = async () => {
-    isLoading.value = true;
-    errorMessage.value = null;
-
-    try {
-        const response = await fetch('/api/components/registry', {
-            headers: {
-                Accept: 'application/json',
-            },
-        });
-
-        if (!response.ok) {
-            throw new Error(
-                `Failed to load registry: ${response.status} ${response.statusText}`,
-            );
-        }
-
-        const data: ComponentRegistryResponse = await response.json();
-
-        if (!data || typeof data.components !== 'object') {
-            throw new Error('Invalid registry contract received from server.');
-        }
-
-        components.value = Object.values(data.components);
-    } catch (err) {
-        errorMessage.value =
-            err instanceof Error
-                ? err.message
-                : 'An unexpected error occurred while fetching the component registry.';
-    } finally {
-        isLoading.value = false;
-    }
-};
-
-onMounted(() => {
-    fetchRegistry();
-});
-
 // Filter components based on category and search query
 const filteredComponents = computed(() => {
-    return components.value.filter((comp) => {
+    return props.components.filter((comp) => {
         const matchesCategory =
             activeCategory.value === 'all' ||
             comp.category === activeCategory.value;
@@ -184,11 +146,34 @@ const handleItemClick = (type: CoreComponentType) => {
             <div class="flex flex-col gap-2.5 border-b p-3">
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-2">
-                        <h2
-                            class="text-xs font-semibold tracking-wider text-muted-foreground uppercase"
-                        >
-                            Components
-                        </h2>
+                        <div class="flex rounded-lg bg-muted p-0.5">
+                            <button
+                                type="button"
+                                :class="[
+                                    'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all',
+                                    activeTab === 'components'
+                                        ? 'bg-background text-foreground shadow-xs'
+                                        : 'text-muted-foreground hover:text-foreground',
+                                ]"
+                                @click="emit('switchTab', 'components')"
+                            >
+                                <LayoutGrid class="h-3 w-3 text-primary" />
+                                <span>Components</span>
+                            </button>
+                            <button
+                                type="button"
+                                :class="[
+                                    'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all',
+                                    activeTab === 'layers'
+                                        ? 'bg-background text-foreground shadow-xs'
+                                        : 'text-muted-foreground hover:text-foreground',
+                                ]"
+                                @click="emit('switchTab', 'layers')"
+                            >
+                                <Layers class="h-3 w-3 text-primary" />
+                                <span>Layers</span>
+                            </button>
+                        </div>
                         <Badge
                             v-if="!isLoading && !errorMessage"
                             variant="secondary"
@@ -284,7 +269,7 @@ const handleItemClick = (type: CoreComponentType) => {
                         variant="outline"
                         size="sm"
                         class="mt-3 w-full gap-1.5 text-xs"
-                        @click="fetchRegistry"
+                        @click="emit('retry')"
                     >
                         <RefreshCw class="h-3 w-3" />
                         Retry Connection

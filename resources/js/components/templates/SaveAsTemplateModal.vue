@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, toRef } from 'vue';
 import { Bookmark, CheckCircle2, Loader2, X } from '@lucide/vue';
+import { useModalFocus } from '@/composables/useModalFocus';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { DocumentSchema } from '@/types/document';
+import { requestJson } from '@/lib/httpClient';
 
 const props = defineProps<{
     open: boolean;
@@ -23,6 +25,12 @@ const category = ref('general');
 const isSubmitting = ref(false);
 const errorMessage = ref<string | null>(null);
 const successMessage = ref<string | null>(null);
+const modalRef = ref<HTMLElement | null>(null);
+
+useModalFocus(toRef(props, 'open'), modalRef, {
+    onClose: () => handleClose(),
+    initialFocusSelector: 'input',
+});
 
 const resetForm = () => {
     name.value = '';
@@ -49,27 +57,19 @@ const handleSave = async () => {
     successMessage.value = null;
 
     try {
-        const response = await fetch(`/websites/${props.websiteId}/templates`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Accept: 'application/json',
-                'X-XSRF-TOKEN': decodeURIComponent(
-                    document.cookie
-                        .split('; ')
-                        .find((row) => row.startsWith('XSRF-TOKEN='))
-                        ?.split('=')[1] ?? '',
-                ),
+        const response = await requestJson<any>(
+            `/websites/${props.websiteId}/templates`,
+            {
+                method: 'POST',
+                body: {
+                    name: name.value.trim(),
+                    description: description.value.trim() || null,
+                    category: category.value,
+                    document_json: props.document,
+                },
             },
-            body: JSON.stringify({
-                name: name.value.trim(),
-                description: description.value.trim() || null,
-                category: category.value,
-                document_json: props.document,
-            }),
-        });
-
-        const data = await response.json();
+        );
+        const data = response.data;
 
         if (!response.ok) {
             errorMessage.value =
@@ -100,10 +100,12 @@ const handleSave = async () => {
         @click.self="handleClose"
     >
         <div
+            ref="modalRef"
+            tabindex="-1"
             role="dialog"
             aria-modal="true"
             aria-labelledby="save-template-title"
-            class="relative w-full max-w-md animate-in rounded-xl border bg-background p-6 shadow-xl duration-150 zoom-in-95 fade-in"
+            class="relative w-full max-w-md animate-in rounded-xl border bg-background p-6 shadow-xl duration-150 zoom-in-95 fade-in focus:outline-hidden"
         >
             <div class="flex items-center justify-between border-b pb-4">
                 <div class="flex items-center gap-2.5">

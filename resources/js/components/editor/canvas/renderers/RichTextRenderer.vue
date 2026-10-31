@@ -5,9 +5,19 @@ import { sanitizeHtml } from '@/lib/domSanitizer';
 const props = withDefaults(
     defineProps<{
         content?: string;
+        align?: 'left' | 'center' | 'right';
+        blockSpacing?: 'none' | 'small' | 'medium' | 'large';
+        maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
+        fontSize?: 'semantic' | 'small' | 'medium' | 'large' | 'xlarge';
+        textColor?: 'foreground' | 'soft' | 'muted' | 'primary';
     }>(),
     {
         content: '<p>Start typing rich text here...</p>',
+        align: 'left',
+        blockSpacing: 'small',
+        maxWidth: 'full',
+        fontSize: 'semantic',
+        textColor: 'soft',
     },
 );
 

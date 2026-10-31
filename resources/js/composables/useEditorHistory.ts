@@ -3,32 +3,44 @@ import {
     getCurrentInstance,
     onMounted,
     onUnmounted,
-    ref,
-    type Ref,
+    shallowRef,
+    triggerRef,
+    type ShallowRef,
 } from 'vue';
 import type { DocumentSchema } from '@/types/document';
 
 export interface UseEditorHistoryOptions {
     maxSnapshots?: number;
     debounceMs?: number;
-    onApplySnapshot?: (doc: DocumentSchema) => void;
+    onApplySnapshot?: (doc: DocumentSchema) => ApplyDocumentResult;
+    onUndo?: () => void;
+    onRedo?: () => void;
 }
+
+type ApplyDocumentResult = void | boolean | { success: boolean };
 
 export function useEditorHistory(
     getCurrentDocument: () => DocumentSchema,
-    applyDocument: (doc: DocumentSchema) => void,
+    applyDocument: (doc: DocumentSchema) => ApplyDocumentResult,
     options: UseEditorHistoryOptions = {},
 ) {
     const maxSnapshots = options.maxSnapshots ?? 30;
     const debounceMs = options.debounceMs ?? 300;
 
-    const past: Ref<DocumentSchema[]> = ref([]);
-    const future: Ref<DocumentSchema[]> = ref([]);
+    const past: ShallowRef<DocumentSchema[]> = shallowRef([]);
+    const future: ShallowRef<DocumentSchema[]> = shallowRef([]);
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     let pendingBaseSnapshot: DocumentSchema | null = null;
 
     function cloneDoc(doc: DocumentSchema): DocumentSchema {
+        if (typeof structuredClone === 'function') {
+            try {
+                return structuredClone(doc);
+            } catch {
+                return JSON.parse(JSON.stringify(doc));
+            }
+        }
         return JSON.parse(JSON.stringify(doc));
     }
 
@@ -45,6 +57,8 @@ export function useEditorHistory(
             }
             pendingBaseSnapshot = null;
             future.value = [];
+            triggerRef(past);
+            triggerRef(future);
         }
     }
 
@@ -62,6 +76,8 @@ export function useEditorHistory(
         }
 
         future.value = [];
+        triggerRef(past);
+        triggerRef(future);
     }
 
     // Record debounced edit (used for continuous typing or slider dragging)
@@ -87,10 +103,20 @@ export function useEditorHistory(
         if (past.value.length === 0) return false;
 
         const currentDoc = cloneDoc(getCurrentDocument());
-        const previousDoc = past.value.pop()!;
+        const previousDoc = past.value[past.value.length - 1];
+        const applyResult = applyDocument(previousDoc);
+        if (
+            applyResult === false ||
+            (typeof applyResult === 'object' && !applyResult.success)
+        ) {
+            return false;
+        }
 
+        past.value.pop();
         future.value.push(currentDoc);
-        applyDocument(previousDoc);
+        triggerRef(past);
+        triggerRef(future);
+        options.onUndo?.();
 
         return true;
     }
@@ -100,10 +126,20 @@ export function useEditorHistory(
         if (future.value.length === 0) return false;
 
         const currentDoc = cloneDoc(getCurrentDocument());
-        const nextDoc = future.value.pop()!;
+        const nextDoc = future.value[future.value.length - 1];
+        const applyResult = applyDocument(nextDoc);
+        if (
+            applyResult === false ||
+            (typeof applyResult === 'object' && !applyResult.success)
+        ) {
+            return false;
+        }
 
+        future.value.pop();
         past.value.push(currentDoc);
-        applyDocument(nextDoc);
+        triggerRef(past);
+        triggerRef(future);
+        options.onRedo?.();
 
         return true;
     }
@@ -112,6 +148,8 @@ export function useEditorHistory(
         flushPending();
         past.value = [];
         future.value = [];
+        triggerRef(past);
+        triggerRef(future);
     }
 
     // Keyboard shortcuts handler

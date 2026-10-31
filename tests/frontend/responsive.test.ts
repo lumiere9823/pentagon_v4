@@ -1,14 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import type { DocumentNode } from '@/types/document';
 import {
+    RESPONSIVE_BREAKPOINTS,
     COMPONENT_DISPLAY_MODES,
     RESPONSIVE_DISPLAY_CLASSES,
+    RESPONSIVE_OVERRIDABLE_PROPS,
+    buildEditorResponsivePresentation,
+    configureResponsiveContract,
     getInheritedPropInfo,
     isPropOverridden,
     isResponsiveProp,
     resolveAllResponsiveProps,
     resolveResponsiveProp,
 } from '@/lib/responsive';
+import { VIEWPORT_PRESETS } from '@/config/editor';
+import { STYLE_PRIMITIVES } from '@/lib/stylePrimitives';
+import type { ComponentMetadata } from '@/types/document';
 
 describe('responsive.ts resolver', () => {
     it('resolves base prop value on desktop', () => {
@@ -43,7 +50,9 @@ describe('responsive.ts resolver', () => {
             type: 'Heading',
             props: { align: 'left' },
         };
-        expect(resolveResponsiveProp(nodeNoOverride, 'align', 'tablet')).toBe('left');
+        expect(resolveResponsiveProp(nodeNoOverride, 'align', 'tablet')).toBe(
+            'left',
+        );
     });
 
     it('implements full cascade on mobile: mobile -> tablet -> desktop', () => {
@@ -126,9 +135,207 @@ describe('responsive.ts resolver', () => {
             },
         };
 
-        expect(resolveResponsiveProp(node, 'display', 'desktop')).toBeUndefined();
-        expect(resolveResponsiveProp(node, 'display', 'tablet')).toBeUndefined();
+        expect(
+            resolveResponsiveProp(node, 'display', 'desktop'),
+        ).toBeUndefined();
+        expect(
+            resolveResponsiveProp(node, 'display', 'tablet'),
+        ).toBeUndefined();
         expect(resolveResponsiveProp(node, 'display', 'mobile')).toBe('hidden');
+    });
+
+    it('inherits tablet visibility on mobile unless mobile explicitly overrides it', () => {
+        const inherited: DocumentNode = {
+            id: 'node_inherited_hidden',
+            type: 'Heading',
+            props: { text: 'Hidden', align: 'left' },
+            styles: { tablet: { display: 'hidden' } },
+        };
+        const resetOnMobile: DocumentNode = {
+            ...inherited,
+            id: 'node_mobile_visible',
+            styles: {
+                tablet: { display: 'hidden' },
+                mobile: { display: 'visible' },
+            },
+        };
+
+        expect(resolveResponsiveProp(inherited, 'display', 'tablet')).toBe(
+            'hidden',
+        );
+        expect(resolveResponsiveProp(inherited, 'display', 'mobile')).toBe(
+            'hidden',
+        );
+        expect(resolveResponsiveProp(resetOnMobile, 'display', 'mobile')).toBe(
+            'visible',
+        );
+    });
+
+    it('keeps canvas presets separate from the public responsive breakpoints', () => {
+        expect(RESPONSIVE_BREAKPOINTS.tablet).toBe(768);
+        expect(RESPONSIVE_BREAKPOINTS.desktop).toBe(1024);
+        expect(VIEWPORT_PRESETS.desktop.width).toBe(1280);
+    });
+
+    it('accepts the server registry as the runtime responsive contract', () => {
+        configureResponsiveContract({
+            breakpoints: { tablet: 768, desktop: 1024 },
+            overridableProps: {
+                Heading: ['align'],
+                Columns: ['count', 'gap'],
+            },
+        });
+
+        expect(RESPONSIVE_BREAKPOINTS).toEqual({ tablet: 768, desktop: 1024 });
+        expect(isResponsiveProp('Heading', 'align')).toBe(true);
+        expect(isResponsiveProp('Heading', 'text')).toBe(false);
+    });
+
+    it('keeps base primitive values but rejects responsive use when eligibility is false', () => {
+        const primitive = STYLE_PRIMITIVES['dimensions.controlSize'];
+        const originalResponsive = primitive.responsive;
+        const originalButtonProps = [...RESPONSIVE_OVERRIDABLE_PROPS.Button];
+        primitive.responsive = false;
+
+        try {
+            configureResponsiveContract(
+                {
+                    breakpoints: { tablet: 768, desktop: 1024 },
+                    overridableProps: { Button: ['size', 'unknown'] },
+                },
+                {
+                    Button: {
+                        type: 'Button',
+                        label: 'Button',
+                        category: 'interactive',
+                        allowChildren: false,
+                        canBeRoot: false,
+                        props: {
+                            size: {
+                                type: 'string',
+                                enum: ['sm', 'md', 'lg'],
+                                stylePrimitive: 'dimensions.controlSize',
+                            },
+                        },
+                        inspector: [],
+                    } as ComponentMetadata,
+                },
+            );
+
+            const button: DocumentNode = {
+                id: 'button_nonresponsive_primitive',
+                type: 'Button',
+                props: { size: 'lg' },
+                styles: { tablet: { size: 'sm' } },
+            };
+
+            expect(isResponsiveProp('Button', 'size')).toBe(false);
+            expect(isResponsiveProp('Button', 'unknown')).toBe(false);
+            expect(resolveAllResponsiveProps(button, 'tablet').size).toBe('lg');
+        } finally {
+            primitive.responsive = originalResponsive;
+            RESPONSIVE_OVERRIDABLE_PROPS.Button = originalButtonProps;
+        }
+    });
+
+    it('builds viewport-stable editor presentation for supported overrides', () => {
+        const node: DocumentNode = {
+            id: 'node_columns',
+            type: 'Columns',
+            props: { count: 4, gap: 'large' },
+            styles: {
+                tablet: { count: 3, gap: 'medium' },
+                mobile: { count: 2, gap: 'small' },
+            },
+        };
+
+        expect(
+            buildEditorResponsivePresentation(node, 'mobile').root,
+        ).toMatchObject({
+            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+            gap: '0.75rem',
+        });
+        expect(
+            buildEditorResponsivePresentation(node, 'tablet').root,
+        ).toMatchObject({
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gap: '2rem',
+        });
+        expect(
+            buildEditorResponsivePresentation(node, 'desktop').root,
+        ).toMatchObject({
+            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+            gap: '3rem',
+        });
+    });
+
+    it('keeps natural tablet layout when only mobile column count is overridden', () => {
+        const node: DocumentNode = {
+            id: 'cardgrid_mobile_only',
+            type: 'CardGrid',
+            props: { columns: 4, gap: 'medium' },
+            styles: { mobile: { columns: 2 } },
+        };
+
+        expect(
+            buildEditorResponsivePresentation(node, 'mobile').root
+                .gridTemplateColumns,
+        ).toBe('repeat(2, minmax(0, 1fr))');
+        expect(
+            buildEditorResponsivePresentation(node, 'tablet').root
+                .gridTemplateColumns,
+        ).toBe('repeat(2, minmax(0, 1fr))');
+        expect(
+            buildEditorResponsivePresentation(node, 'desktop').root
+                .gridTemplateColumns,
+        ).toBe('repeat(4, minmax(0, 1fr))');
+    });
+
+    it('uses the selected canvas viewport even when a node has no overrides', () => {
+        const node: DocumentNode = {
+            id: 'node_plain',
+            type: 'Section',
+            props: { padding: 'medium', background: 'transparent' },
+        };
+
+        expect(buildEditorResponsivePresentation(node, 'mobile')).toEqual({
+            root: {
+                paddingBlock: '2rem',
+                backgroundColor: 'transparent',
+                color: 'var(--foreground)',
+            },
+            content: {},
+        });
+    });
+
+    it('resolves typography from the simulated viewport instead of the browser window', () => {
+        const heading: DocumentNode = {
+            id: 'heading_typography',
+            type: 'Heading',
+            props: { text: 'Title', level: 1, align: 'left' },
+        };
+        const hero: DocumentNode = {
+            id: 'hero_typography',
+            type: 'Hero',
+            props: { title: 'Hero', align: 'center' },
+        };
+
+        expect(
+            buildEditorResponsivePresentation(heading, 'mobile').root.fontSize,
+        ).toBe('1.875rem');
+        expect(
+            buildEditorResponsivePresentation(heading, 'desktop').root.fontSize,
+        ).toBe('2.25rem');
+        expect(
+            buildEditorResponsivePresentation(hero, 'mobile').root[
+                '--pb-hero-title-size'
+            ],
+        ).toBe('1.875rem');
+        expect(
+            buildEditorResponsivePresentation(hero, 'desktop').root[
+                '--pb-hero-title-size'
+            ],
+        ).toBe('3rem');
     });
 
     it('verifies all 12 components have valid intrinsic display modes', () => {
@@ -147,10 +354,18 @@ describe('responsive.ts resolver', () => {
     });
 
     it('verifies static responsive display class tokens exist for build scanning', () => {
-        expect(RESPONSIVE_DISPLAY_CLASSES.grid.mobileHidden).toBe('hidden md:grid');
-        expect(RESPONSIVE_DISPLAY_CLASSES.flex.tabletHidden).toBe('flex md:hidden lg:flex');
-        expect(RESPONSIVE_DISPLAY_CLASSES['inline-block'].mobileHidden).toBe('hidden md:inline-block');
-        expect(RESPONSIVE_DISPLAY_CLASSES.block.mobileAndTabletHidden).toBe('hidden lg:block');
+        expect(RESPONSIVE_DISPLAY_CLASSES.grid.mobileHidden).toBe(
+            'hidden md:grid',
+        );
+        expect(RESPONSIVE_DISPLAY_CLASSES.flex.tabletHidden).toBe(
+            'flex md:hidden lg:flex',
+        );
+        expect(RESPONSIVE_DISPLAY_CLASSES['inline-block'].mobileHidden).toBe(
+            'hidden md:inline-block',
+        );
+        expect(RESPONSIVE_DISPLAY_CLASSES.block.mobileAndTabletHidden).toBe(
+            'hidden lg:block',
+        );
     });
 
     it('checks isResponsiveProp against canonical allowlist', () => {
@@ -196,10 +411,18 @@ describe('responsive.ts resolver', () => {
             props: { text: 'Hello', align: 'center' },
         };
 
-        expect(resolveResponsiveProp(nodeWithoutStyles, 'align', 'tablet')).toBe('center');
-        expect(resolveResponsiveProp(nodeWithoutStyles, 'align', 'mobile')).toBe('center');
-        expect(isPropOverridden(nodeWithoutStyles, 'align', 'mobile')).toBe(false);
-        expect(getInheritedPropInfo(nodeWithoutStyles, 'align', 'mobile')).toEqual({
+        expect(
+            resolveResponsiveProp(nodeWithoutStyles, 'align', 'tablet'),
+        ).toBe('center');
+        expect(
+            resolveResponsiveProp(nodeWithoutStyles, 'align', 'mobile'),
+        ).toBe('center');
+        expect(isPropOverridden(nodeWithoutStyles, 'align', 'mobile')).toBe(
+            false,
+        );
+        expect(
+            getInheritedPropInfo(nodeWithoutStyles, 'align', 'mobile'),
+        ).toEqual({
             value: 'center',
             source: 'desktop',
         });
@@ -210,10 +433,19 @@ describe('responsive.ts resolver', () => {
     });
 
     it('ensures each component maps to a supported intrinsic layout mode', () => {
-        const supportedModes = new Set(['block', 'inline-block', 'flex', 'grid']);
-        for (const [component, mode] of Object.entries(COMPONENT_DISPLAY_MODES)) {
+        const supportedModes = new Set([
+            'block',
+            'inline-block',
+            'flex',
+            'grid',
+        ]);
+        for (const mode of Object.values(COMPONENT_DISPLAY_MODES)) {
             expect(supportedModes.has(mode)).toBe(true);
-            expect(RESPONSIVE_DISPLAY_CLASSES[mode as keyof typeof RESPONSIVE_DISPLAY_CLASSES]).toBeDefined();
+            expect(
+                RESPONSIVE_DISPLAY_CLASSES[
+                    mode as keyof typeof RESPONSIVE_DISPLAY_CLASSES
+                ],
+            ).toBeDefined();
         }
     });
 });

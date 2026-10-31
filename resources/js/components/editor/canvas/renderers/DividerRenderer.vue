@@ -5,10 +5,12 @@ const props = withDefaults(
     defineProps<{
         style?: 'solid' | 'dashed' | 'dotted';
         color?: 'muted' | 'primary' | 'subtle';
+        presentationStyle?: Record<string, string | number>;
     }>(),
     {
         style: 'solid',
         color: 'muted',
+        presentationStyle: () => ({}),
     },
 );
 
@@ -37,6 +39,9 @@ const colorClass = computed(() => {
 
 <template>
     <div class="my-6 w-full py-2">
-        <hr :class="['w-full border-t', borderStyleClass, colorClass]" />
+        <hr
+            :class="['w-full border-t', borderStyleClass, colorClass]"
+            :style="presentationStyle"
+        />
     </div>
 </template>

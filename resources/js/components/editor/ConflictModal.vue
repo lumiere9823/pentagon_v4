@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { ref, toRef } from 'vue';
 import { AlertTriangle, RefreshCw, UploadCloud } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
+import { useModalFocus } from '@/composables/useModalFocus';
 
 interface Props {
     open: boolean;
@@ -14,6 +16,12 @@ const emit = defineEmits<{
     (e: 'reload'): void;
     (e: 'overwrite'): void;
 }>();
+
+const modalRef = ref<HTMLElement | null>(null);
+
+useModalFocus(toRef(props, 'open'), modalRef, {
+    closeOnEscape: false,
+});
 </script>
 
 <template>
@@ -22,9 +30,12 @@ const emit = defineEmits<{
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
     >
         <div
-            class="relative w-full max-w-md rounded-xl border border-destructive/30 bg-background p-6 shadow-2xl"
+            ref="modalRef"
+            tabindex="-1"
+            class="relative w-full max-w-md rounded-xl border border-destructive/30 bg-background p-6 shadow-2xl focus:outline-hidden"
             role="dialog"
             aria-modal="true"
+            aria-labelledby="conflict-modal-title"
         >
             <div class="flex items-start gap-3">
                 <div
@@ -33,7 +44,10 @@ const emit = defineEmits<{
                     <AlertTriangle class="h-5 w-5" />
                 </div>
                 <div>
-                    <h3 class="text-base font-semibold text-foreground">
+                    <h3
+                        id="conflict-modal-title"
+                        class="text-base font-semibold text-foreground"
+                    >
                         Conflict Detected
                     </h3>
                     <p

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, toRef } from 'vue';
 import { CheckCircle2, Copy, Check, ExternalLink, X, Globe } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
+import { useModalFocus } from '@/composables/useModalFocus';
 
 const props = defineProps<{
     open: boolean;
@@ -14,6 +15,11 @@ const emit = defineEmits<{
 }>();
 
 const copied = ref(false);
+const modalRef = ref<HTMLElement | null>(null);
+
+useModalFocus(toRef(props, 'open'), modalRef, {
+    onClose: () => close(),
+});
 
 const copyUrl = async () => {
     try {
@@ -39,7 +45,9 @@ const close = () => {
         @click.self="close"
     >
         <div
-            class="w-full max-w-md rounded-xl border bg-background p-6 shadow-2xl transition-all"
+            ref="modalRef"
+            tabindex="-1"
+            class="w-full max-w-md rounded-xl border bg-background p-6 shadow-2xl transition-all focus:outline-hidden"
             role="dialog"
             aria-modal="true"
             aria-labelledby="publish-success-title"

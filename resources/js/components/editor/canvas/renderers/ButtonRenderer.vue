@@ -8,6 +8,7 @@ const props = withDefaults(
         variant?: 'primary' | 'secondary' | 'outline' | 'ghost';
         size?: 'sm' | 'md' | 'lg';
         target?: '_self' | '_blank';
+        presentationStyle?: Record<string, string | number>;
     }>(),
     {
         label: 'Button',
@@ -15,6 +16,7 @@ const props = withDefaults(
         variant: 'primary',
         size: 'md',
         target: '_self',
+        presentationStyle: () => ({}),
     },
 );
 
@@ -53,6 +55,7 @@ const sizeClass = computed(() => {
                 variantClass,
                 sizeClass,
             ]"
+            :style="presentationStyle"
             @click.prevent
         >
             {{ label || 'Button' }}

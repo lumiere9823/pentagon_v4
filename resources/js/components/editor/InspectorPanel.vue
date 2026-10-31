@@ -1,26 +1,23 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import {
-    AlertCircle,
     Copy,
-    Image as ImageIcon,
     Info,
-    Link as LinkIcon,
+    Lock,
     MousePointer,
     Paintbrush,
     PanelRightClose,
-    Plus,
     Settings,
     SlidersHorizontal,
     Trash2,
 } from '@lucide/vue';
 import MediaLibraryModal from '@/components/media/MediaLibraryModal.vue';
+import InspectorContentGroup from './inspector/InspectorContentGroup.vue';
+import InspectorQuickActions from './inspector/InspectorQuickActions.vue';
+import InspectorSettingsGroup from './inspector/InspectorSettingsGroup.vue';
+import InspectorStyleGroup from './inspector/InspectorStyleGroup.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import {
     Tooltip,
     TooltipContent,
@@ -28,18 +25,12 @@ import {
     TooltipTrigger,
 } from '@/components/ui/tooltip';
 import {
-    coercePropValue,
-    type PropSchemaDefinition,
+    getInspectorFields,
+    validateInspectorValue,
 } from '@/lib/inspectorHelpers';
-import {
-    getInheritedPropInfo,
-    isPropOverridden,
-    isResponsiveProp,
-    resolveResponsiveProp,
-} from '@/lib/responsive';
+import { isResponsiveProp } from '@/lib/responsive';
 import type {
     ComponentMetadata,
-    CoreComponentType,
     DocumentNode,
     ViewportMode,
 } from '@/types/document';
@@ -50,6 +41,9 @@ const props = withDefaults(
         selectedNode: DocumentNode | null;
         componentMetadata?: ComponentMetadata | null;
         readOnly?: boolean;
+        isLocked?: boolean;
+        isAncestorLocked?: boolean;
+        lockedAncestorLabel?: string | null;
         isRoot?: boolean;
         currentViewport?: ViewportMode;
         websiteId?: number;
@@ -57,6 +51,9 @@ const props = withDefaults(
     {
         componentMetadata: null,
         readOnly: false,
+        isLocked: false,
+        isAncestorLocked: false,
+        lockedAncestorLabel: null,
         isRoot: false,
         currentViewport: 'desktop',
         websiteId: undefined,
@@ -83,113 +80,51 @@ const emit = defineEmits<{
 }>();
 
 const activeTab = ref<'content' | 'style' | 'settings'>('content');
+const isMediaModalOpen = ref(false);
+const mediaTargetNodeId = ref<string | null>(null);
 
-function getPropValue(key: string): unknown {
-    if (!props.selectedNode) return undefined;
-    return resolveResponsiveProp(
-        props.selectedNode,
-        key,
-        props.currentViewport,
-    );
-}
-
-function isOverridden(key: string): boolean {
-    if (!props.selectedNode) return false;
-    return isPropOverridden(props.selectedNode, key, props.currentViewport);
-}
-
-function getInheritedInfo(key: string): {
-    value: unknown;
-    source: 'desktop' | 'tablet';
-} {
-    if (!props.selectedNode) return { value: undefined, source: 'desktop' };
-    return getInheritedPropInfo(props.selectedNode, key, props.currentViewport);
-}
+const isNodeDirectLocked = computed(
+    () => props.isLocked || Boolean(props.selectedNode?.locked),
+);
+const isProtectedByAncestor = computed(() => Boolean(props.isAncestorLocked));
+const isNodeProtected = computed(
+    () => isNodeDirectLocked.value || isProtectedByAncestor.value,
+);
+const isEffectiveReadOnly = computed(
+    () => props.readOnly || isNodeProtected.value,
+);
 
 const handleResetStyle = (key: string) => {
-    if (props.readOnly || props.currentViewport === 'desktop') return;
+    if (isEffectiveReadOnly.value || props.currentViewport === 'desktop')
+        return;
     emit('resetStyle', { viewport: props.currentViewport, key });
 };
 
-// Helper to convert camelCase to Human Readable Label
-function formatPropLabel(key: string): string {
-    return key
-        .replace(/([A-Z])/g, ' $1')
-        .replace(/^./, (str) => str.toUpperCase())
-        .trim();
-}
+const fieldsForGroup = (group: 'content' | 'style' | 'settings') =>
+    getInspectorFields(props.componentMetadata, group).filter((field) => {
+        if (!props.selectedNode) return false;
+        if (field.key === 'display') return field.responsive;
+        return (
+            field.responsive ===
+            isResponsiveProp(props.selectedNode.type, field.key)
+        );
+    });
 
-// Categorize props into Content, Style, Settings
-const CONTENT_PROP_KEYS = new Set([
-    'text',
-    'content',
-    'src',
-    'alt',
-    'caption',
-    'label',
-    'url',
-    'title',
-    'subtitle',
-    'ctaText',
-    'ctaUrl',
-    'items',
+const contentProps = computed(() => fieldsForGroup('content'));
+const styleProps = computed(() => fieldsForGroup('style'));
+const settingsProps = computed(() => fieldsForGroup('settings'));
+const inspectorProps = computed(() => [
+    ...contentProps.value,
+    ...styleProps.value,
+    ...settingsProps.value,
 ]);
-
-const STYLE_PROP_KEYS = new Set([
-    'level',
-    'align',
-    'padding',
-    'background',
-    'maxWidth',
-    'aspectRatio',
-    'variant',
-    'size',
-    'gap',
-    'style',
-    'color',
-    'count',
-    'columns',
-    'centered',
-]);
-
-const propSchemas = computed(() => {
-    return props.componentMetadata?.props || {};
-});
-
-const contentProps = computed(() => {
-    const list: Array<{ key: string; schema: any }> = [];
-    for (const [key, schema] of Object.entries(propSchemas.value)) {
-        if (CONTENT_PROP_KEYS.has(key)) {
-            list.push({ key, schema });
-        }
-    }
-    return list;
-});
-
-const styleProps = computed(() => {
-    const list: Array<{ key: string; schema: any }> = [];
-    for (const [key, schema] of Object.entries(propSchemas.value)) {
-        if (STYLE_PROP_KEYS.has(key)) {
-            list.push({ key, schema });
-        }
-    }
-    return list;
-});
-
-const settingsProps = computed(() => {
-    const list: Array<{ key: string; schema: any }> = [];
-    for (const [key, schema] of Object.entries(propSchemas.value)) {
-        if (!CONTENT_PROP_KEYS.has(key) && !STYLE_PROP_KEYS.has(key)) {
-            list.push({ key, schema });
-        }
-    }
-    return list;
-});
 
 // Auto-switch tab if current tab has no properties
 watch(
     () => props.selectedNode?.id,
     () => {
+        isMediaModalOpen.value = false;
+        mediaTargetNodeId.value = null;
         if (contentProps.value.length > 0) {
             activeTab.value = 'content';
         } else if (styleProps.value.length > 0) {
@@ -201,37 +136,60 @@ watch(
 );
 
 const handlePropChange = (key: string, value: unknown) => {
-    if (props.readOnly) return;
-    const schema = propSchemas.value[key] as PropSchemaDefinition | undefined;
-    const resolvedValue = coercePropValue(schema, value);
+    if (isEffectiveReadOnly.value || !props.selectedNode) return false;
+    const field = inspectorProps.value.find(
+        (candidate) => candidate.key === key,
+    );
+    if (!field) return false;
 
-    if (
-        props.currentViewport !== 'desktop' &&
-        props.selectedNode &&
-        isResponsiveProp(props.selectedNode.type, key)
-    ) {
+    const validation = validateInspectorValue(field, value);
+    if (!validation.valid) return false;
+
+    if (field.path === 'styles.*.display') {
+        if (props.currentViewport === 'desktop' || !field.responsive) {
+            return false;
+        }
         emit('updateStyle', {
             viewport: props.currentViewport,
             key,
-            value: resolvedValue,
+            value: validation.value,
+        });
+        return true;
+    }
+
+    if (props.currentViewport !== 'desktop' && field.responsive) {
+        emit('updateStyle', {
+            viewport: props.currentViewport,
+            key,
+            value: validation.value,
         });
     } else {
-        emit('updateProp', { key, value: resolvedValue });
+        emit('updateProp', { key, value: validation.value });
     }
+
+    return true;
 };
 
 // Media Library Picker state and handlers
-const isMediaModalOpen = ref(false);
-
 const openMediaLibrary = () => {
+    if (isEffectiveReadOnly.value || !props.selectedNode) return;
+    mediaTargetNodeId.value = props.selectedNode.id;
     isMediaModalOpen.value = true;
 };
 
 const handleMediaSelect = (asset: MediaAssetItem) => {
-    if (!props.selectedNode) return;
+    if (
+        !props.selectedNode ||
+        mediaTargetNodeId.value !== props.selectedNode.id
+    ) {
+        return;
+    }
 
     // 1. Write canonical public URL to src
-    handlePropChange('src', asset.url);
+    if (!handlePropChange('src', asset.url)) {
+        mediaTargetNodeId.value = null;
+        return;
+    }
 
     // 2. D-020: Auto-fill alt only when existing alt value is empty
     const currentAlt = props.selectedNode.props.alt;
@@ -243,46 +201,8 @@ const handleMediaSelect = (asset: MediaAssetItem) => {
     if (isAltEmpty && asset.alt_text) {
         handlePropChange('alt', asset.alt_text);
     }
-};
 
-// FAQ Item Repeater handlers
-const addFaqItem = () => {
-    if (props.readOnly || !props.selectedNode) return;
-    const currentItems = Array.isArray(props.selectedNode.props.items)
-        ? [...props.selectedNode.props.items]
-        : [];
-    currentItems.push({
-        question: 'New Question',
-        answer: '<p>Answer details here.</p>',
-    });
-    emit('updateProp', { key: 'items', value: currentItems });
-};
-
-const updateFaqItem = (
-    index: number,
-    field: 'question' | 'answer',
-    value: string,
-) => {
-    if (props.readOnly || !props.selectedNode) return;
-    const currentItems = Array.isArray(props.selectedNode.props.items)
-        ? [...props.selectedNode.props.items]
-        : [];
-    if (currentItems[index]) {
-        currentItems[index] = {
-            ...currentItems[index],
-            [field]: value,
-        };
-        emit('updateProp', { key: 'items', value: currentItems });
-    }
-};
-
-const removeFaqItem = (index: number) => {
-    if (props.readOnly || !props.selectedNode) return;
-    const currentItems = Array.isArray(props.selectedNode.props.items)
-        ? [...props.selectedNode.props.items]
-        : [];
-    currentItems.splice(index, 1);
-    emit('updateProp', { key: 'items', value: currentItems });
+    mediaTargetNodeId.value = null;
 };
 </script>
 
@@ -319,7 +239,9 @@ const removeFaqItem = (index: number) => {
 
                 <div class="flex items-center gap-0.5">
                     <!-- Quick Duplicate -->
-                    <Tooltip v-if="selectedNode && !isRoot && !readOnly">
+                    <Tooltip
+                        v-if="selectedNode && !isRoot && !isEffectiveReadOnly"
+                    >
                         <TooltipTrigger as-child>
                             <Button
                                 variant="ghost"
@@ -337,7 +259,9 @@ const removeFaqItem = (index: number) => {
                     </Tooltip>
 
                     <!-- Quick Delete -->
-                    <Tooltip v-if="selectedNode && !isRoot && !readOnly">
+                    <Tooltip
+                        v-if="selectedNode && !isRoot && !isEffectiveReadOnly"
+                    >
                         <TooltipTrigger as-child>
                             <Button
                                 variant="ghost"
@@ -371,6 +295,32 @@ const removeFaqItem = (index: number) => {
                             <p class="text-xs">Collapse Inspector</p>
                         </TooltipContent>
                     </Tooltip>
+                </div>
+            </div>
+
+            <!-- Locked Component Banner -->
+            <div
+                v-if="isNodeProtected"
+                role="status"
+                aria-live="polite"
+                class="flex items-start gap-2 border-b bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300"
+                data-testid="inspector-lock-banner"
+            >
+                <Lock
+                    class="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400"
+                />
+                <div class="flex-1 leading-normal">
+                    <span v-if="isProtectedByAncestor">
+                        This component is locked by its ancestor{{
+                            lockedAncestorLabel
+                                ? ` (${lockedAncestorLabel})`
+                                : ''
+                        }}. Unlock it in the Layers panel to make changes.
+                    </span>
+                    <span v-else>
+                        This component is locked. Unlock it in the Layers panel
+                        to make changes.
+                    </span>
                 </div>
             </div>
 
@@ -476,614 +426,50 @@ const removeFaqItem = (index: number) => {
 
                 <!-- Panel Fields Form Area -->
                 <div class="flex-1 space-y-4 overflow-y-auto p-4">
-                    <!-- Tab 1: Content Fields -->
-                    <div v-if="activeTab === 'content'" class="space-y-4">
-                        <div
-                            v-if="contentProps.length === 0"
-                            class="py-6 text-center text-xs text-muted-foreground"
-                        >
-                            No content properties for this component.
-                        </div>
+                    <InspectorContentGroup
+                        v-if="activeTab === 'content'"
+                        :node="selectedNode"
+                        :fields="contentProps"
+                        :read-only="isEffectiveReadOnly"
+                        :website-id="websiteId"
+                        @update-prop="
+                            handlePropChange($event.key, $event.value)
+                        "
+                        @open-media-library="openMediaLibrary"
+                    />
 
-                        <div
-                            v-for="{ key, schema } in contentProps"
-                            :key="key"
-                            class="space-y-1.5"
-                        >
-                            <!-- FAQ Array Repeater -->
-                            <div
-                                v-if="
-                                    schema.type === 'array' && key === 'items'
-                                "
-                                class="space-y-3"
-                            >
-                                <div class="flex items-center justify-between">
-                                    <Label class="text-xs font-semibold">{{
-                                        formatPropLabel(key)
-                                    }}</Label>
-                                    <Button
-                                        v-if="!readOnly"
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        class="h-6 gap-1 px-2 text-[11px]"
-                                        @click="addFaqItem"
-                                    >
-                                        <Plus class="h-3 w-3" />
-                                        <span>Add FAQ</span>
-                                    </Button>
-                                </div>
+                    <InspectorStyleGroup
+                        v-if="activeTab === 'style'"
+                        :node="selectedNode"
+                        :fields="styleProps"
+                        :read-only="isEffectiveReadOnly"
+                        :current-viewport="currentViewport"
+                        @update-prop="
+                            handlePropChange($event.key, $event.value)
+                        "
+                        @reset-style="handleResetStyle"
+                    />
 
-                                <div
-                                    v-for="(item, idx) in (selectedNode.props[
-                                        key
-                                    ] as any[]) || []"
-                                    :key="idx"
-                                    class="space-y-2 rounded-lg border bg-muted/20 p-2.5"
-                                >
-                                    <div
-                                        class="flex items-center justify-between"
-                                    >
-                                        <span
-                                            class="text-[10px] font-semibold text-muted-foreground"
-                                        >
-                                            Item #{{ idx + 1 }}
-                                        </span>
-                                        <button
-                                            v-if="!readOnly"
-                                            type="button"
-                                            aria-label="Remove item"
-                                            class="text-destructive hover:opacity-80"
-                                            @click="removeFaqItem(idx)"
-                                        >
-                                            <Trash2 class="h-3.5 w-3.5" />
-                                        </button>
-                                    </div>
-                                    <Input
-                                        :model-value="item.question"
-                                        :disabled="readOnly"
-                                        placeholder="Question..."
-                                        class="h-7 text-xs"
-                                        @update:model-value="
-                                            updateFaqItem(
-                                                idx,
-                                                'question',
-                                                String($event),
-                                            )
-                                        "
-                                    />
-                                    <Textarea
-                                        :model-value="item.answer"
-                                        :disabled="readOnly"
-                                        placeholder="Answer (HTML allowed)..."
-                                        class="min-h-12 text-xs"
-                                        @update:model-value="
-                                            updateFaqItem(
-                                                idx,
-                                                'answer',
-                                                String($event),
-                                            )
-                                        "
-                                    />
-                                </div>
-                            </div>
-
-                            <!-- RichText / HTML Textarea -->
-                            <div v-else-if="schema.isHtml" class="space-y-1">
-                                <Label
-                                    :for="`prop-${key}`"
-                                    class="text-xs font-medium"
-                                >
-                                    {{ formatPropLabel(key) }}
-                                </Label>
-                                <Textarea
-                                    :id="`prop-${key}`"
-                                    :model-value="
-                                        String(selectedNode.props[key] || '')
-                                    "
-                                    :disabled="readOnly"
-                                    class="min-h-24 font-mono text-xs"
-                                    @update:model-value="
-                                        handlePropChange(key, $event)
-                                    "
-                                />
-                                <p class="text-[10px] text-muted-foreground">
-                                    Safe HTML is supported. Scripts and event
-                                    handlers are automatically sanitized.
-                                </p>
-                            </div>
-
-                            <!-- URL Input -->
-                            <div v-else-if="schema.isUrl" class="space-y-1">
-                                <div class="flex items-center justify-between">
-                                    <Label
-                                        :for="`prop-${key}`"
-                                        class="text-xs font-medium"
-                                    >
-                                        {{ formatPropLabel(key) }}
-                                    </Label>
-                                    <Button
-                                        v-if="
-                                            selectedNode.type === 'Image' &&
-                                            key === 'src' &&
-                                            websiteId
-                                        "
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        class="h-6 gap-1 px-2 text-[11px]"
-                                        :disabled="readOnly"
-                                        @click="openMediaLibrary"
-                                    >
-                                        <ImageIcon class="h-3 w-3" />
-                                        Choose from Library
-                                    </Button>
-                                </div>
-                                <div class="relative">
-                                    <LinkIcon
-                                        class="absolute top-2.5 left-2.5 h-3.5 w-3.5 text-muted-foreground"
-                                    />
-                                    <Input
-                                        :id="`prop-${key}`"
-                                        :model-value="
-                                            String(
-                                                selectedNode.props[key] || '',
-                                            )
-                                        "
-                                        :disabled="readOnly"
-                                        placeholder="https://..."
-                                        class="h-8 pl-8 font-mono text-xs"
-                                        @update:model-value="
-                                            handlePropChange(key, $event)
-                                        "
-                                    />
-                                </div>
-                            </div>
-
-                            <!-- Regular String / Text Input -->
-                            <div v-else class="space-y-1">
-                                <div class="flex items-center justify-between">
-                                    <Label
-                                        :for="`prop-${key}`"
-                                        class="text-xs font-medium"
-                                    >
-                                        {{ formatPropLabel(key) }}
-                                    </Label>
-                                    <span
-                                        v-if="schema.maxLength"
-                                        class="text-[10px] text-muted-foreground"
-                                    >
-                                        {{
-                                            String(
-                                                selectedNode.props[key] || '',
-                                            ).length
-                                        }}/{{ schema.maxLength }}
-                                    </span>
-                                </div>
-                                <Input
-                                    :id="`prop-${key}`"
-                                    :model-value="
-                                        String(selectedNode.props[key] || '')
-                                    "
-                                    :disabled="readOnly"
-                                    :maxlength="schema.maxLength"
-                                    class="h-8 text-xs"
-                                    @update:model-value="
-                                        handlePropChange(key, $event)
-                                    "
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Tab 2: Style Fields -->
-                    <div v-if="activeTab === 'style'" class="space-y-4">
-                        <!-- Component Visibility (Responsive display property) -->
-                        <div
-                            v-if="selectedNode"
-                            class="space-y-1.5 rounded-lg border bg-muted/15 p-2.5"
-                        >
-                            <div class="flex items-center justify-between">
-                                <Label
-                                    for="style-visibility"
-                                    class="text-xs font-semibold"
-                                >
-                                    Component Visibility
-                                </Label>
-                                <div
-                                    v-if="
-                                        currentViewport !== 'desktop' &&
-                                        isOverridden('display')
-                                    "
-                                    class="flex items-center gap-1.5"
-                                >
-                                    <Badge
-                                        variant="secondary"
-                                        class="border border-amber-500/20 bg-amber-500/15 px-1.5 py-0 text-[10px] text-amber-700 dark:text-amber-400"
-                                    >
-                                        Overridden
-                                    </Badge>
-                                    <Button
-                                        v-if="!readOnly"
-                                        variant="ghost"
-                                        size="sm"
-                                        class="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
-                                        @click="handleResetStyle('display')"
-                                    >
-                                        Reset
-                                    </Button>
-                                </div>
-                                <span
-                                    v-else-if="currentViewport !== 'desktop'"
-                                    class="text-[10px] text-muted-foreground italic"
-                                >
-                                    Inherited from
-                                    {{ getInheritedInfo('display').source }} ({{
-                                        getInheritedInfo('display').value ||
-                                        'visible'
-                                    }})
-                                </span>
-                            </div>
-
-                            <div
-                                v-if="currentViewport === 'desktop'"
-                                class="text-[11px] text-muted-foreground"
-                            >
-                                Visible on desktop. Switch to Tablet or Mobile
-                                viewport to hide on specific screen sizes.
-                            </div>
-                            <div v-else class="mt-1">
-                                <select
-                                    id="style-visibility"
-                                    :value="
-                                        getPropValue('display') || 'visible'
-                                    "
-                                    :disabled="readOnly"
-                                    class="h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-xs shadow-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                                    @change="
-                                        handlePropChange(
-                                            'display',
-                                            ($event.target as HTMLSelectElement)
-                                                .value,
-                                        )
-                                    "
-                                >
-                                    <option
-                                        value="visible"
-                                        class="bg-background text-foreground"
-                                    >
-                                        Visible
-                                    </option>
-                                    <option
-                                        value="hidden"
-                                        class="bg-background text-foreground"
-                                    >
-                                        Hidden
-                                    </option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div
-                            v-if="styleProps.length === 0"
-                            class="py-4 text-center text-xs text-muted-foreground"
-                        >
-                            No additional style properties for this component.
-                        </div>
-
-                        <div
-                            v-for="{ key, schema } in styleProps"
-                            :key="key"
-                            class="space-y-1.5"
-                        >
-                            <div class="flex items-center justify-between">
-                                <Label
-                                    :for="`style-${key}`"
-                                    class="text-xs font-medium"
-                                >
-                                    {{ formatPropLabel(key) }}
-                                </Label>
-
-                                <!-- Responsive override indicator & reset -->
-                                <div
-                                    v-if="
-                                        currentViewport !== 'desktop' &&
-                                        selectedNode &&
-                                        isResponsiveProp(selectedNode.type, key)
-                                    "
-                                    class="flex items-center gap-1.5"
-                                >
-                                    <template v-if="isOverridden(key)">
-                                        <Badge
-                                            variant="secondary"
-                                            class="border border-amber-500/20 bg-amber-500/15 px-1.5 py-0 text-[10px] text-amber-700 dark:text-amber-400"
-                                        >
-                                            Overridden
-                                        </Badge>
-                                        <Button
-                                            v-if="!readOnly"
-                                            variant="ghost"
-                                            size="sm"
-                                            class="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
-                                            @click="handleResetStyle(key)"
-                                        >
-                                            Reset
-                                        </Button>
-                                    </template>
-                                    <span
-                                        v-else
-                                        class="text-[10px] text-muted-foreground italic"
-                                    >
-                                        Inherited from
-                                        {{ getInheritedInfo(key).source }}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <!-- Enum Select / Options -->
-                            <select
-                                v-if="schema.enum"
-                                :id="`style-${key}`"
-                                :value="getPropValue(key)"
-                                :disabled="readOnly"
-                                class="h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-xs shadow-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                                @change="
-                                    handlePropChange(
-                                        key,
-                                        ($event.target as HTMLSelectElement)
-                                            .value,
-                                    )
-                                "
-                            >
-                                <option
-                                    v-for="opt in schema.enum"
-                                    :key="opt"
-                                    :value="opt"
-                                    class="bg-background text-foreground capitalize"
-                                >
-                                    {{ opt }}
-                                </option>
-                            </select>
-
-                            <!-- Number / Integer Input -->
-                            <Input
-                                v-else-if="schema.type === 'integer'"
-                                :id="`style-${key}`"
-                                type="number"
-                                :model-value="Number(getPropValue(key) ?? 0)"
-                                :disabled="readOnly"
-                                class="h-8 text-xs"
-                                @update:model-value="
-                                    handlePropChange(key, Number($event))
-                                "
-                            />
-
-                            <!-- Boolean Input -->
-                            <div
-                                v-else-if="schema.type === 'boolean'"
-                                class="flex items-center justify-between rounded-lg border bg-muted/10 p-2.5"
-                            >
-                                <Label
-                                    :for="`style-${key}`"
-                                    class="cursor-pointer text-xs font-medium"
-                                >
-                                    {{ formatPropLabel(key) }}
-                                </Label>
-                                <input
-                                    :id="`style-${key}`"
-                                    type="checkbox"
-                                    :checked="Boolean(getPropValue(key))"
-                                    :disabled="readOnly"
-                                    class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                                    @change="
-                                        handlePropChange(
-                                            key,
-                                            ($event.target as HTMLInputElement)
-                                                .checked,
-                                        )
-                                    "
-                                />
-                            </div>
-
-                            <!-- Fallback String Input -->
-                            <Input
-                                v-else
-                                :id="`style-${key}`"
-                                :model-value="String(getPropValue(key) ?? '')"
-                                :disabled="readOnly"
-                                class="h-8 text-xs"
-                                @update:model-value="
-                                    handlePropChange(key, $event)
-                                "
-                            />
-                        </div>
-                    </div>
-
-                    <!-- Tab 3: Settings Fields -->
-                    <div v-if="activeTab === 'settings'" class="space-y-4">
-                        <!-- Additional Props -->
-                        <div
-                            v-for="{ key, schema } in settingsProps"
-                            :key="key"
-                            class="space-y-1.5"
-                        >
-                            <!-- Header with override indicator if responsive -->
-                            <div
-                                v-if="
-                                    currentViewport !== 'desktop' &&
-                                    selectedNode &&
-                                    isResponsiveProp(selectedNode.type, key)
-                                "
-                                class="flex items-center justify-between"
-                            >
-                                <Label
-                                    :for="`setting-${key}`"
-                                    class="text-xs font-medium"
-                                >
-                                    {{ formatPropLabel(key) }}
-                                </Label>
-                                <div class="flex items-center gap-1.5">
-                                    <template v-if="isOverridden(key)">
-                                        <Badge
-                                            variant="secondary"
-                                            class="border border-amber-500/20 bg-amber-500/15 px-1.5 py-0 text-[10px] text-amber-700 dark:text-amber-400"
-                                        >
-                                            Overridden
-                                        </Badge>
-                                        <Button
-                                            v-if="!readOnly"
-                                            variant="ghost"
-                                            size="sm"
-                                            class="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
-                                            @click="handleResetStyle(key)"
-                                        >
-                                            Reset
-                                        </Button>
-                                    </template>
-                                    <span
-                                        v-else
-                                        class="text-[10px] text-muted-foreground italic"
-                                    >
-                                        Inherited from
-                                        {{ getInheritedInfo(key).source }}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <!-- Boolean Checkbox / Switch -->
-                            <div
-                                v-if="schema.type === 'boolean'"
-                                class="flex items-center justify-between rounded-lg border bg-muted/10 p-2.5"
-                            >
-                                <Label
-                                    :for="`setting-${key}`"
-                                    class="cursor-pointer text-xs font-medium"
-                                >
-                                    {{ formatPropLabel(key) }}
-                                </Label>
-                                <input
-                                    :id="`setting-${key}`"
-                                    type="checkbox"
-                                    :checked="Boolean(getPropValue(key))"
-                                    :disabled="readOnly"
-                                    class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                                    @change="
-                                        handlePropChange(
-                                            key,
-                                            ($event.target as HTMLInputElement)
-                                                .checked,
-                                        )
-                                    "
-                                />
-                            </div>
-
-                            <!-- Enum Select for settings (e.g. target) -->
-                            <div v-else-if="schema.enum" class="space-y-1">
-                                <Label
-                                    v-if="
-                                        currentViewport === 'desktop' ||
-                                        !selectedNode ||
-                                        !isResponsiveProp(
-                                            selectedNode.type,
-                                            key,
-                                        )
-                                    "
-                                    :for="`setting-${key}`"
-                                    class="text-xs font-medium"
-                                >
-                                    {{ formatPropLabel(key) }}
-                                </Label>
-                                <select
-                                    :id="`setting-${key}`"
-                                    :value="getPropValue(key)"
-                                    :disabled="readOnly"
-                                    class="h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-xs shadow-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                                    @change="
-                                        handlePropChange(
-                                            key,
-                                            ($event.target as HTMLSelectElement)
-                                                .value,
-                                        )
-                                    "
-                                >
-                                    <option
-                                        v-for="opt in schema.enum"
-                                        :key="opt"
-                                        :value="opt"
-                                        class="bg-background text-foreground capitalize"
-                                    >
-                                        {{ opt }}
-                                    </option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <!-- Node Diagnostic Information -->
-                        <div
-                            class="space-y-1.5 rounded-lg border bg-muted/20 p-3 text-xs"
-                        >
-                            <div
-                                class="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase"
-                            >
-                                Node Identity
-                            </div>
-                            <div
-                                class="flex items-center justify-between text-muted-foreground"
-                            >
-                                <span>ID:</span>
-                                <span
-                                    class="font-mono text-[10px] text-foreground"
-                                    >{{ selectedNode.id }}</span
-                                >
-                            </div>
-                            <div
-                                class="flex items-center justify-between text-muted-foreground"
-                            >
-                                <span>Type:</span>
-                                <span class="font-medium text-foreground">{{
-                                    selectedNode.type
-                                }}</span>
-                            </div>
-                            <div
-                                class="flex items-center justify-between text-muted-foreground"
-                            >
-                                <span>Children:</span>
-                                <span class="font-mono text-foreground">
-                                    {{
-                                        selectedNode.children
-                                            ? selectedNode.children.length
-                                            : 0
-                                    }}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
+                    <InspectorSettingsGroup
+                        v-if="activeTab === 'settings'"
+                        :node="selectedNode"
+                        :fields="settingsProps"
+                        :read-only="isEffectiveReadOnly"
+                        :current-viewport="currentViewport"
+                        @update-prop="
+                            handlePropChange($event.key, $event.value)
+                        "
+                        @reset-style="handleResetStyle"
+                    />
                 </div>
 
-                <!-- Footer: Quick Actions (if not Root) -->
-                <div
-                    v-if="!readOnly && selectedNode && !isRoot"
-                    class="flex items-center gap-2 border-t bg-muted/10 p-3"
-                >
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        class="flex-1 text-xs"
-                        @click="emit('duplicateNode', selectedNode.id)"
-                    >
-                        <Copy class="mr-1.5 h-3.5 w-3.5" />
-                        Duplicate
-                    </Button>
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        class="flex-1 border-destructive/30 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        @click="emit('deleteNode', selectedNode.id)"
-                    >
-                        <Trash2 class="mr-1.5 h-3.5 w-3.5" />
-                        Delete
-                    </Button>
-                </div>
+                <InspectorQuickActions
+                    :node="selectedNode"
+                    :read-only="isEffectiveReadOnly"
+                    :is-root="isRoot"
+                    @duplicate="emit('duplicateNode', $event)"
+                    @delete="emit('deleteNode', $event)"
+                />
             </template>
         </TooltipProvider>
 
@@ -1092,7 +478,7 @@ const removeFaqItem = (index: number) => {
             v-if="websiteId"
             v-model:open="isMediaModalOpen"
             :website-id="websiteId"
-            :can-manage="!readOnly"
+            :can-manage="!isEffectiveReadOnly"
             @select="handleMediaSelect"
         />
     </aside>

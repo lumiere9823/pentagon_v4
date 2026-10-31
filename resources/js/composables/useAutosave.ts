@@ -1,5 +1,6 @@
 import { computed, onMounted, onUnmounted, ref, type Ref } from 'vue';
 import type { DocumentSchema } from '@/types/document';
+import { requestJson } from '@/lib/httpClient';
 
 export type SaveStatus = 'saved' | 'saving' | 'dirty' | 'error' | 'conflict';
 
@@ -25,14 +26,6 @@ export interface UseAutosaveOptions {
     onConflict?: (details: ConflictDetails) => void;
 }
 
-function getXsrfToken(): string {
-    if (typeof document === 'undefined') return '';
-    const match = document.cookie
-        .split('; ')
-        .find((row) => row.startsWith('XSRF-TOKEN='));
-    return match ? decodeURIComponent(match.split('=')[1] ?? '') : '';
-}
-
 export function useAutosave(options: UseAutosaveOptions) {
     const debounceMs = options.debounceMs ?? 2000;
     const maxRetries = options.maxRetries ?? 3;
@@ -47,10 +40,14 @@ export function useAutosave(options: UseAutosaveOptions) {
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let retryCount = 0;
     let inFlightSave = false;
-    let pendingChangeAfterSave = false;
+    const pendingChangeAfterSave = ref(false);
 
     const isDirty = computed(
-        () => saveStatus.value === 'dirty' || pendingChangeAfterSave,
+        () =>
+            saveStatus.value === 'dirty' ||
+            saveStatus.value === 'error' ||
+            saveStatus.value === 'conflict' ||
+            pendingChangeAfterSave.value,
     );
     const isSaving = computed(() => saveStatus.value === 'saving');
 
@@ -75,7 +72,7 @@ export function useAutosave(options: UseAutosaveOptions) {
         }
 
         if (inFlightSave) {
-            pendingChangeAfterSave = true;
+            pendingChangeAfterSave.value = true;
             return;
         }
 
@@ -101,7 +98,7 @@ export function useAutosave(options: UseAutosaveOptions) {
         clearTimers();
 
         if (inFlightSave) {
-            pendingChangeAfterSave = true;
+            pendingChangeAfterSave.value = true;
             return false;
         }
 
@@ -124,20 +121,14 @@ export function useAutosave(options: UseAutosaveOptions) {
         }
 
         try {
-            const response = await fetch(
+            const response = await requestJson<any>(
                 `/websites/${options.websiteId}/pages/${options.pageId}/content`,
                 {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Accept: 'application/json',
-                        'X-XSRF-TOKEN': getXsrfToken(),
-                    },
-                    body: JSON.stringify(payload),
+                    body: payload,
                 },
             );
-
-            const data = await response.json();
+            const data = response.data;
 
             if (response.ok && data.success) {
                 lockVersion.value = data.lock_version;
@@ -154,8 +145,11 @@ export function useAutosave(options: UseAutosaveOptions) {
 
                 inFlightSave = false;
 
-                if (pendingChangeAfterSave) {
-                    pendingChangeAfterSave = false;
+                if (pendingChangeAfterSave.value) {
+                    pendingChangeAfterSave.value = false;
+                    if (!isAutosave) {
+                        return saveNow(changeSummary, false);
+                    }
                     notifyChange();
                 }
 
@@ -175,7 +169,7 @@ export function useAutosave(options: UseAutosaveOptions) {
                 }
 
                 inFlightSave = false;
-                pendingChangeAfterSave = false;
+                pendingChangeAfterSave.value = false;
                 return false;
             }
 
@@ -224,11 +218,7 @@ export function useAutosave(options: UseAutosaveOptions) {
 
     // Navigation and visibility handlers
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-        if (
-            saveStatus.value === 'dirty' ||
-            inFlightSave ||
-            pendingChangeAfterSave
-        ) {
+        if (inFlightSave || isDirty.value) {
             e.preventDefault();
             e.returnValue = '';
         }
@@ -239,7 +229,7 @@ export function useAutosave(options: UseAutosaveOptions) {
             typeof document !== 'undefined' &&
             document.visibilityState === 'hidden'
         ) {
-            if (saveStatus.value === 'dirty' || pendingChangeAfterSave) {
+            if (saveStatus.value === 'dirty' || pendingChangeAfterSave.value) {
                 void saveNow(undefined, true);
             }
         }

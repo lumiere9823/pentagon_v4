@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, toRef, watch } from 'vue';
+import { useModalFocus } from '@/composables/useModalFocus';
 import {
     History,
     RotateCcw,
@@ -13,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { DocumentSchema } from '@/types/document';
+import { requestJson } from '@/lib/httpClient';
 
 interface RevisionSummary {
     id: number;
@@ -45,32 +47,24 @@ const revisions = ref<RevisionSummary[]>([]);
 const isLoading = ref(false);
 const errorMessage = ref<string | null>(null);
 const rollingBackId = ref<number | null>(null);
+const modalRef = ref<HTMLElement | null>(null);
 
-function getXsrfToken(): string {
-    if (typeof document === 'undefined') return '';
-    const match = document.cookie
-        .split('; ')
-        .find((row) => row.startsWith('XSRF-TOKEN='));
-    return match ? decodeURIComponent(match.split('=')[1] ?? '') : '';
-}
+useModalFocus(toRef(props, 'open'), modalRef, {
+    onClose: () => emit('update:open', false),
+});
 
 const fetchRevisions = async () => {
     isLoading.value = true;
     errorMessage.value = null;
 
     try {
-        const response = await fetch(
-            `/websites/${props.websiteId}/pages/${props.pageId}/revisions`,
-            {
-                headers: {
-                    Accept: 'application/json',
-                },
-            },
+        const response = await requestJson<any>(
+            `/websites/${props.websiteId}/pages/${props.pageId}/revisions?limit=50`,
+            {},
         );
 
         if (response.ok) {
-            const data = await response.json();
-            revisions.value = data.revisions || [];
+            revisions.value = response.data.revisions || [];
         } else {
             errorMessage.value = 'Failed to load revision history.';
         }
@@ -103,19 +97,14 @@ const handleRestore = async (revision: RevisionSummary) => {
     errorMessage.value = null;
 
     try {
-        const response = await fetch(
+        const response = await requestJson<any>(
             `/websites/${props.websiteId}/pages/${props.pageId}/revisions/${revision.id}/rollback`,
             {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Accept: 'application/json',
-                    'X-XSRF-TOKEN': getXsrfToken(),
-                },
+                headers: { 'Content-Type': 'application/json' },
             },
         );
-
-        const data = await response.json();
+        const data = response.data;
 
         if (response.ok && data.success) {
             emit('restored', {
@@ -154,18 +143,25 @@ const formatDate = (dateStr: string) => {
     <div
         v-if="open"
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
+        @click.self="emit('update:open', false)"
     >
         <div
-            class="relative flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl border bg-background shadow-2xl"
+            ref="modalRef"
+            tabindex="-1"
+            class="relative flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl border bg-background shadow-2xl focus:outline-hidden"
             role="dialog"
             aria-modal="true"
+            aria-labelledby="revisions-modal-title"
         >
             <!-- Header -->
             <div class="flex items-center justify-between border-b px-5 py-4">
                 <div class="flex items-center gap-2">
                     <History class="h-5 w-5 text-primary" />
                     <div>
-                        <h2 class="text-base font-semibold text-foreground">
+                        <h2
+                            id="revisions-modal-title"
+                            class="text-base font-semibold text-foreground"
+                        >
                             Revision History
                         </h2>
                         <p class="text-xs text-muted-foreground">
@@ -177,6 +173,7 @@ const formatDate = (dateStr: string) => {
                     variant="ghost"
                     size="icon"
                     class="h-8 w-8 rounded-full"
+                    aria-label="Close revision history"
                     @click="emit('update:open', false)"
                 >
                     <X class="h-4 w-4" />

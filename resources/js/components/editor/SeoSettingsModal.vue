@@ -3,9 +3,11 @@ import { computed, ref, watch } from 'vue';
 import {
     AlertCircle,
     CheckCircle2,
+    Code2,
     Eye,
     Globe,
     Image as ImageIcon,
+    RotateCcw,
     Search,
     Share2,
     X,
@@ -56,8 +58,9 @@ const emit = defineEmits<{
     (e: 'save'): void;
 }>();
 
-const activeTab = ref<'seo' | 'social'>('seo');
+const activeTab = ref<'seo' | 'social' | 'schema'>('seo');
 const mediaLibraryOpen = ref(false);
+const structuredDataRaw = ref<string>('');
 
 const localSeo = ref<LocalSeoForm>({
     meta_title: '',
@@ -87,6 +90,20 @@ watch(
             nofollow: Boolean(val?.nofollow),
             schema_type: val?.schema_type ?? 'WebPage',
         };
+
+        if (val?.structured_data_json) {
+            try {
+                structuredDataRaw.value = JSON.stringify(
+                    val.structured_data_json,
+                    null,
+                    2,
+                );
+            } catch {
+                structuredDataRaw.value = '';
+            }
+        } else {
+            structuredDataRaw.value = '';
+        }
     },
     { immediate: true, deep: true },
 );
@@ -108,12 +125,67 @@ const effectiveCanonical = computed(
 const titleLength = computed(() => localSeo.value.meta_title.length);
 const descLength = computed(() => localSeo.value.meta_description.length);
 
+const structuredDataError = computed<string | null>(() => {
+    const raw = structuredDataRaw.value.trim();
+    if (!raw) return null;
+    try {
+        const parsed = JSON.parse(raw);
+        if (
+            typeof parsed !== 'object' ||
+            parsed === null ||
+            Array.isArray(parsed)
+        ) {
+            return 'Structured data must be a valid JSON object.';
+        }
+        return null;
+    } catch (e: any) {
+        return e?.message || 'Invalid JSON syntax';
+    }
+});
+
+const parsedStructuredData = computed<Record<string, unknown> | null>(() => {
+    const raw = structuredDataRaw.value.trim();
+    if (!raw || structuredDataError.value) return null;
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+});
+
+const resetToSchemaBoilerplate = () => {
+    const template: Record<string, unknown> = {
+        '@context': 'https://schema.org',
+        '@type': localSeo.value.schema_type,
+        name: effectiveTitle.value,
+        description: effectiveDescription.value,
+        url: effectiveCanonical.value,
+    };
+
+    if (localSeo.value.schema_type === 'Article') {
+        template.headline = effectiveTitle.value;
+        template.author = {
+            '@type': 'Person',
+            name: 'Editorial Team',
+        };
+    } else if (localSeo.value.schema_type === 'Organization') {
+        template.legalName = props.websiteName;
+    }
+
+    structuredDataRaw.value = JSON.stringify(template, null, 2);
+};
+
 const handleMediaSelect = (asset: MediaAssetItem) => {
     localSeo.value.og_image_url = asset.url;
     mediaLibraryOpen.value = false;
 };
 
 const handleSave = () => {
+    if (structuredDataError.value) {
+        activeTab.value = 'schema';
+        return;
+    }
+
     emit('update:modelValue', {
         meta_title: localSeo.value.meta_title.trim() || null,
         meta_description: localSeo.value.meta_description.trim() || null,
@@ -125,6 +197,7 @@ const handleSave = () => {
         noindex: localSeo.value.noindex,
         nofollow: localSeo.value.nofollow,
         schema_type: localSeo.value.schema_type,
+        structured_data_json: parsedStructuredData.value,
     });
     emit('save');
     emit('update:open', false);
@@ -149,8 +222,8 @@ const handleSave = () => {
                             <DialogDescription
                                 class="text-xs text-muted-foreground"
                             >
-                                Configure search engine visibility and social
-                                share cards for {{ pageTitle }}
+                                Configure search engine visibility, social share
+                                cards, and structured schema for {{ pageTitle }}
                             </DialogDescription>
                         </div>
                     </div>
@@ -166,6 +239,7 @@ const handleSave = () => {
                                 ? 'border-primary font-semibold text-primary'
                                 : 'border-transparent text-muted-foreground hover:text-foreground'
                         "
+                        data-testid="seo-tab-btn"
                         @click="activeTab = 'seo'"
                     >
                         <Search class="h-4 w-4" />
@@ -179,10 +253,25 @@ const handleSave = () => {
                                 ? 'border-primary font-semibold text-primary'
                                 : 'border-transparent text-muted-foreground hover:text-foreground'
                         "
+                        data-testid="social-tab-btn"
                         @click="activeTab = 'social'"
                     >
                         <Share2 class="h-4 w-4" />
                         <span>Social Cards (OG / Twitter)</span>
+                    </button>
+                    <button
+                        type="button"
+                        class="flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium transition-colors"
+                        :class="
+                            activeTab === 'schema'
+                                ? 'border-primary font-semibold text-primary'
+                                : 'border-transparent text-muted-foreground hover:text-foreground'
+                        "
+                        data-testid="schema-tab-btn"
+                        @click="activeTab = 'schema'"
+                    >
+                        <Code2 class="h-4 w-4" />
+                        <span>Structured Data (Schema.org)</span>
                     </button>
                 </div>
             </DialogHeader>
@@ -307,7 +396,7 @@ const handleSave = () => {
                         </p>
                     </div>
 
-                    <!-- Indexing Directives (noindex) -->
+                    <!-- Indexing & Robot Directives (noindex & nofollow) -->
                     <div class="space-y-3 rounded-lg border bg-muted/20 p-4">
                         <div class="flex items-start gap-3">
                             <input
@@ -331,11 +420,33 @@ const handleSave = () => {
                                 </p>
                             </div>
                         </div>
+
+                        <div class="flex items-start gap-3 border-t pt-3">
+                            <input
+                                id="nofollow"
+                                v-model="localSeo.nofollow"
+                                type="checkbox"
+                                class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                            />
+                            <div class="space-y-0.5">
+                                <label
+                                    for="nofollow"
+                                    class="cursor-pointer text-xs font-medium"
+                                >
+                                    Instruct search engines not to follow
+                                    outbound links (nofollow)
+                                </label>
+                                <p class="text-[11px] text-muted-foreground">
+                                    Adds "nofollow" to the robots directive so
+                                    crawler bots don't pass PageRank to links.
+                                </p>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Tab: Social Cards -->
-                <div v-else class="space-y-6">
+                <div v-else-if="activeTab === 'social'" class="space-y-6">
                     <!-- Social Card Preview -->
                     <div
                         class="rounded-lg border bg-slate-50/50 p-4 dark:bg-slate-900/40"
@@ -343,19 +454,34 @@ const handleSave = () => {
                         <div class="mb-2 flex items-center justify-between">
                             <span
                                 class="text-xs font-semibold tracking-wider text-muted-foreground uppercase"
-                                >Facebook & LinkedIn Social Card Preview</span
+                                >Social Card Preview ({{
+                                    localSeo.twitter_card ===
+                                    'summary_large_image'
+                                        ? 'Large Image Card'
+                                        : 'Summary Card'
+                                }})</span
                             >
                             <Badge variant="outline" class="text-[10px]"
-                                >OpenGraph</Badge
+                                >OpenGraph & Twitter</Badge
                             >
                         </div>
 
                         <div
                             class="mx-auto max-w-md overflow-hidden rounded-md border bg-white shadow-xs dark:bg-slate-950"
+                            :class="{
+                                'flex items-center':
+                                    localSeo.twitter_card === 'summary',
+                            }"
                         >
                             <!-- Image banner -->
                             <div
-                                class="flex aspect-video w-full items-center justify-center overflow-hidden bg-slate-200 dark:bg-slate-800"
+                                class="flex items-center justify-center overflow-hidden bg-slate-200 dark:bg-slate-800"
+                                :class="
+                                    localSeo.twitter_card ===
+                                    'summary_large_image'
+                                        ? 'aspect-video w-full'
+                                        : 'h-28 w-28 shrink-0'
+                                "
                             >
                                 <img
                                     v-if="localSeo.og_image_url"
@@ -367,14 +493,19 @@ const handleSave = () => {
                                     v-else
                                     class="flex flex-col items-center gap-1 text-muted-foreground"
                                 >
-                                    <ImageIcon class="h-8 w-8 stroke-1" />
-                                    <span class="text-[11px]"
-                                        >No social image selected</span
-                                    >
+                                    <ImageIcon class="h-7 w-7 stroke-1" />
+                                    <span class="text-[10px]">No image</span>
                                 </div>
                             </div>
                             <!-- Card body -->
-                            <div class="border-t p-3">
+                            <div
+                                class="flex-1 p-3"
+                                :class="{
+                                    'border-t':
+                                        localSeo.twitter_card ===
+                                        'summary_large_image',
+                                }"
+                            >
                                 <div
                                     class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
                                 >
@@ -397,10 +528,63 @@ const handleSave = () => {
                         </div>
                     </div>
 
+                    <!-- Twitter Card Selector -->
+                    <div class="space-y-2">
+                        <Label class="text-xs font-semibold"
+                            >Twitter / X Card Layout</Label
+                        >
+                        <div class="grid grid-cols-2 gap-3">
+                            <button
+                                type="button"
+                                class="flex flex-col items-start rounded-lg border p-3 text-left transition-colors"
+                                :class="
+                                    localSeo.twitter_card ===
+                                    'summary_large_image'
+                                        ? 'border-primary bg-primary/5 text-primary'
+                                        : 'border-border bg-card text-muted-foreground hover:text-foreground'
+                                "
+                                @click="
+                                    localSeo.twitter_card =
+                                        'summary_large_image'
+                                "
+                            >
+                                <span class="text-xs font-semibold"
+                                    >Large Image Card</span
+                                >
+                                <span
+                                    class="mt-0.5 text-[11px] text-muted-foreground"
+                                >
+                                    Prominent 1.91:1 banner above text
+                                    (Recommended)
+                                </span>
+                            </button>
+                            <button
+                                type="button"
+                                class="flex flex-col items-start rounded-lg border p-3 text-left transition-colors"
+                                :class="
+                                    localSeo.twitter_card === 'summary'
+                                        ? 'border-primary bg-primary/5 text-primary'
+                                        : 'border-border bg-card text-muted-foreground hover:text-foreground'
+                                "
+                                @click="localSeo.twitter_card = 'summary'"
+                            >
+                                <span class="text-xs font-semibold"
+                                    >Summary Card</span
+                                >
+                                <span
+                                    class="mt-0.5 text-[11px] text-muted-foreground"
+                                >
+                                    Compact square thumbnail alongside text
+                                </span>
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- OG Image Picker -->
                     <div class="space-y-2">
                         <Label class="text-xs font-semibold"
-                            >Social Share Image (OG Image)</Label
+                            >Social Share Image (og:image /
+                            twitter:image)</Label
                         >
                         <div class="flex items-center gap-2">
                             <Input
@@ -421,7 +605,7 @@ const handleSave = () => {
                         </div>
                         <p class="text-[11px] text-muted-foreground">
                             Recommended dimensions: 1200 x 630 pixels (Aspect
-                            ratio 1.91:1) in JPG or PNG format.
+                            ratio 1.91:1) in JPG, PNG, or WebP format.
                         </p>
                     </div>
 
@@ -453,6 +637,110 @@ const handleSave = () => {
                         />
                     </div>
                 </div>
+
+                <!-- Tab: Structured Data (Schema.org) -->
+                <div v-else-if="activeTab === 'schema'" class="space-y-6">
+                    <div class="rounded-lg border bg-muted/20 p-4">
+                        <div
+                            class="flex items-center gap-2 text-xs font-semibold text-foreground"
+                        >
+                            <Code2 class="h-4 w-4 text-primary" />
+                            <span>JSON-LD Structured Data (Schema.org)</span>
+                        </div>
+                        <p
+                            class="mt-1 text-xs leading-relaxed text-muted-foreground"
+                        >
+                            Structured data helps search engines understand the
+                            context of your page and enables rich results in
+                            Google search.
+                        </p>
+                    </div>
+
+                    <!-- Schema Type Selection -->
+                    <div class="space-y-2">
+                        <Label for="schema_type" class="text-xs font-semibold"
+                            >Primary Schema Type</Label
+                        >
+                        <select
+                            id="schema_type"
+                            v-model="localSeo.schema_type"
+                            class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs transition-colors"
+                        >
+                            <option value="WebPage">
+                                WebPage — Standard general content
+                            </option>
+                            <option value="Article">
+                                Article — News story, blog post, or article
+                            </option>
+                            <option value="Organization">
+                                Organization — Brand, enterprise, or company
+                                homepage
+                            </option>
+                        </select>
+                    </div>
+
+                    <!-- JSON-LD Editor with Syntax Validation -->
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between">
+                            <Label
+                                for="structured_data"
+                                class="text-xs font-semibold"
+                            >
+                                Custom JSON-LD Code
+                            </Label>
+                            <div class="flex items-center gap-2">
+                                <Badge
+                                    v-if="structuredDataError"
+                                    variant="destructive"
+                                    class="text-[10px]"
+                                >
+                                    JSON Syntax Error
+                                </Badge>
+                                <Badge
+                                    v-else-if="structuredDataRaw.trim()"
+                                    variant="default"
+                                    class="bg-emerald-600 text-[10px] text-white"
+                                >
+                                    Valid JSON-LD
+                                </Badge>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    class="h-6 gap-1 text-[11px]"
+                                    @click="resetToSchemaBoilerplate"
+                                >
+                                    <RotateCcw class="h-3 w-3" />
+                                    <span>Reset to Template</span>
+                                </Button>
+                            </div>
+                        </div>
+
+                        <Textarea
+                            id="structured_data"
+                            v-model="structuredDataRaw"
+                            placeholder='{\n  "@context": "https://schema.org",\n  "@type": "WebPage",\n  "name": "..."\n}'
+                            class="h-40 font-mono text-xs leading-relaxed"
+                            :class="{
+                                'border-destructive':
+                                    Boolean(structuredDataError),
+                            }"
+                        />
+
+                        <div
+                            v-if="structuredDataError"
+                            role="alert"
+                            class="flex items-center gap-1.5 text-xs text-destructive"
+                        >
+                            <AlertCircle class="h-3.5 w-3.5 shrink-0" />
+                            <span>{{ structuredDataError }}</span>
+                        </div>
+                        <p v-else class="text-[11px] text-muted-foreground">
+                            Leave empty to automatically compile a standard
+                            Schema.org payload during release publishing.
+                        </p>
+                    </div>
+                </div>
             </div>
 
             <DialogFooter class="border-t bg-muted/10 px-6 py-3">
@@ -469,6 +757,8 @@ const handleSave = () => {
                     type="button"
                     size="sm"
                     class="h-8 gap-1.5 text-xs"
+                    data-testid="apply-seo-btn"
+                    :disabled="Boolean(structuredDataError)"
                     @click="handleSave"
                 >
                     <CheckCircle2 class="h-3.5 w-3.5" />

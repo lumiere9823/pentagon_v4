@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onErrorCaptured, ref } from 'vue';
-import { AlertCircle } from '@lucide/vue';
+import { AlertCircle, EyeOff } from '@lucide/vue';
 import DropZone from './DropZone.vue';
 import NodeToolbar from './NodeToolbar.vue';
 import ButtonRenderer from './renderers/ButtonRenderer.vue';
@@ -15,7 +15,10 @@ import ImageRenderer from './renderers/ImageRenderer.vue';
 import RichTextRenderer from './renderers/RichTextRenderer.vue';
 import SectionRenderer from './renderers/SectionRenderer.vue';
 import SpacerRenderer from './renderers/SpacerRenderer.vue';
-import { resolveAllResponsiveProps } from '@/lib/responsive';
+import {
+    buildEditorResponsivePresentation,
+    resolveAllResponsiveProps,
+} from '@/lib/responsive';
 import {
     CONTAINER_COMPONENT_TYPES,
     type CoreComponentType,
@@ -34,6 +37,8 @@ const props = withDefaults(
         readOnly?: boolean;
         depth?: number;
         viewport?: ViewportMode;
+        parentLocked?: boolean;
+        parentHidden?: boolean;
     }>(),
     {
         parent: null,
@@ -44,6 +49,8 @@ const props = withDefaults(
         readOnly: false,
         depth: 1,
         viewport: 'desktop',
+        parentLocked: false,
+        parentHidden: false,
     },
 );
 
@@ -74,6 +81,16 @@ const isHovered = computed(
 const isRoot = computed(() => props.parent === null);
 const isContainer = computed(() =>
     CONTAINER_COMPONENT_TYPES.has(props.node.type),
+);
+const isDirectLocked = computed(() => Boolean(props.node.locked));
+const isInheritedLocked = computed(() => Boolean(props.parentLocked));
+const isEffectiveLocked = computed(
+    () => isDirectLocked.value || isInheritedLocked.value,
+);
+const isDirectHidden = computed(() => Boolean(props.node.hidden));
+const isInheritedHidden = computed(() => Boolean(props.parentHidden));
+const isGloballyHidden = computed(
+    () => isDirectHidden.value || isInheritedHidden.value,
 );
 
 const canMoveUp = computed(() => props.index > 0);
@@ -110,6 +127,25 @@ const componentProps = computed(() => {
     return rest;
 });
 
+const responsivePresentation = computed(() =>
+    buildEditorResponsivePresentation(props.node, props.viewport),
+);
+
+const componentPresentationProps = computed(() => {
+    const presentation: Record<string, unknown> = {
+        style: responsivePresentation.value.root,
+    };
+    if (Object.keys(responsivePresentation.value.content).length > 0) {
+        presentation.presentationStyle = responsivePresentation.value.content;
+    }
+    return presentation;
+});
+
+const componentBindings = computed(() => ({
+    ...componentProps.value,
+    ...componentPresentationProps.value,
+}));
+
 const handleNodeClick = (e: MouseEvent) => {
     e.stopPropagation();
     emit('select', props.node.id);
@@ -124,6 +160,12 @@ const handleMouseLeave = (e: MouseEvent) => {
     e.stopPropagation();
     emit('hover', null);
 };
+
+const handleSelectParent = () => {
+    if (props.parent?.id) {
+        emit('select', props.parent.id);
+    }
+};
 </script>
 
 <template>
@@ -135,12 +177,17 @@ const handleMouseLeave = (e: MouseEvent) => {
             isSelected
                 ? isHiddenOnActiveViewport
                     ? 'ring-dashed opacity-75 ring-2 ring-amber-500'
-                    : 'ring-2 ring-primary ring-offset-2 ring-offset-background'
+                    : isGloballyHidden
+                      ? 'ring-dashed opacity-70 ring-2 ring-zinc-400 dark:ring-zinc-500'
+                      : 'ring-2 ring-primary ring-offset-2 ring-offset-background'
                 : isHovered
                   ? 'ring-1 ring-primary/40'
                   : '',
             isHiddenOnActiveViewport && !isSelected
                 ? 'border border-dashed border-muted-foreground/40 opacity-40'
+                : '',
+            isGloballyHidden && !isSelected
+                ? 'border border-dashed border-zinc-400 opacity-50 dark:border-zinc-600'
                 : '',
             !readOnly ? 'cursor-pointer' : '',
         ]"
@@ -148,12 +195,25 @@ const handleMouseLeave = (e: MouseEvent) => {
         @mouseenter="handleMouseEnter"
         @mouseleave="handleMouseLeave"
     >
-        <!-- Hidden on Viewport Badge -->
+        <!-- Badges -->
         <div
-            v-if="isHiddenOnActiveViewport"
-            class="pointer-events-none absolute top-1 right-1 z-20 flex items-center gap-1 rounded bg-amber-500/90 px-1.5 py-0.5 text-[9px] font-medium tracking-wide text-white uppercase shadow-xs"
+            v-if="isGloballyHidden || isHiddenOnActiveViewport"
+            class="pointer-events-none absolute top-1 right-1 z-20 flex items-center gap-1"
         >
-            Hidden on {{ viewport }}
+            <div
+                v-if="isGloballyHidden"
+                data-testid="globally-hidden-badge"
+                class="flex items-center gap-1 rounded bg-zinc-700/85 px-1.5 py-0.5 text-[9px] font-medium tracking-wide text-zinc-100 uppercase shadow-xs dark:bg-zinc-800/85"
+            >
+                <EyeOff class="h-2.5 w-2.5" />
+                Hidden
+            </div>
+            <div
+                v-if="isHiddenOnActiveViewport"
+                class="flex items-center gap-1 rounded bg-amber-500/90 px-1.5 py-0.5 text-[9px] font-medium tracking-wide text-white uppercase shadow-xs"
+            >
+                Hidden on {{ viewport }}
+            </div>
         </div>
 
         <!-- Floating Action Overlay Toolbar for Selected Node -->
@@ -163,10 +223,12 @@ const handleMouseLeave = (e: MouseEvent) => {
             :is-root="isRoot"
             :can-move-up="canMoveUp"
             :can-move-down="canMoveDown"
+            :is-locked="isEffectiveLocked"
             @move-up="emit('moveUp', node.id)"
             @move-down="emit('moveDown', node.id)"
             @duplicate="emit('duplicate', node.id)"
             @delete="emit('delete', node.id)"
+            @select-parent="handleSelectParent"
         />
 
         <!-- Error Fallback Box if renderer throws -->
@@ -182,14 +244,17 @@ const handleMouseLeave = (e: MouseEvent) => {
         <component
             :is="concreteRenderer"
             v-else-if="concreteRenderer"
-            v-bind="componentProps"
+            v-bind="componentBindings"
         >
             <!-- Children Slot for Container Components -->
             <template v-if="isContainer">
                 <!-- DropZone before first child -->
                 <DropZone
                     v-if="
-                        !readOnly && node.children && node.children.length > 0
+                        !readOnly &&
+                        !isEffectiveLocked &&
+                        node.children &&
+                        node.children.length > 0
                     "
                     :parent-id="node.id"
                     :insert-index="0"
@@ -199,7 +264,11 @@ const handleMouseLeave = (e: MouseEvent) => {
 
                 <!-- Empty Container Placeholder / Drop Zone -->
                 <DropZone
-                    v-if="!node.children || node.children.length === 0"
+                    v-if="
+                        !readOnly &&
+                        !isEffectiveLocked &&
+                        (!node.children || node.children.length === 0)
+                    "
                     :parent-id="node.id"
                     :insert-index="0"
                     :read-only="readOnly"
@@ -222,6 +291,8 @@ const handleMouseLeave = (e: MouseEvent) => {
                         :read-only="readOnly"
                         :depth="depth + 1"
                         :viewport="viewport"
+                        :parent-locked="isEffectiveLocked"
+                        :parent-hidden="isGloballyHidden"
                         @select="emit('select', $event)"
                         @hover="emit('hover', $event)"
                         @move-up="emit('moveUp', $event)"
@@ -233,7 +304,7 @@ const handleMouseLeave = (e: MouseEvent) => {
 
                     <!-- DropZone after each child -->
                     <DropZone
-                        v-if="!readOnly"
+                        v-if="!readOnly && !isEffectiveLocked"
                         :parent-id="node.id"
                         :insert-index="childIdx + 1"
                         :read-only="readOnly"

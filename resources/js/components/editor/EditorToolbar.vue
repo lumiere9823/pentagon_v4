@@ -8,9 +8,12 @@ import {
     CheckCircle2,
     Clock,
     Eye,
+    EyeOff,
     Globe,
     History,
+    Layers,
     LayoutGrid,
+    Link as LinkIcon,
     Loader2,
     PanelLeftClose,
     PanelLeftOpen,
@@ -54,6 +57,7 @@ const props = withDefaults(
         viewport: ViewportMode;
         leftSidebarOpen: boolean;
         rightPanelOpen: boolean;
+        activeLeftTab?: 'components' | 'layers';
         userRole: string;
         canEdit: boolean;
         canUndo?: boolean;
@@ -64,6 +68,7 @@ const props = withDefaults(
         isPublishing?: boolean;
     }>(),
     {
+        activeLeftTab: 'components',
         canUndo: false,
         canRedo: false,
         saveStatus: 'saved',
@@ -76,14 +81,17 @@ const props = withDefaults(
 const emit = defineEmits<{
     (e: 'update:viewport', value: ViewportMode): void;
     (e: 'toggleLeftSidebar'): void;
+    (e: 'selectLeftTab', tab: 'components' | 'layers'): void;
     (e: 'toggleRightPanel'): void;
     (e: 'undo'): void;
     (e: 'redo'): void;
     (e: 'saveAsTemplate'): void;
     (e: 'save'): void;
     (e: 'openRevisions'): void;
+    (e: 'openReleases'): void;
     (e: 'openSeo'): void;
     (e: 'publish'): void;
+    (e: 'unpublish'): void;
     (e: 'preview'): void;
     (e: 'sharePreview'): void;
 }>();
@@ -144,7 +152,7 @@ const getStatusBadge = (status: string) => {
                     </TooltipContent>
                 </Tooltip>
 
-                <!-- Component Library Trigger (Collapses/Expands Component Library) -->
+                <!-- Component Library Trigger -->
                 <Tooltip>
                     <TooltipTrigger as-child>
                         <Button
@@ -153,14 +161,11 @@ const getStatusBadge = (status: string) => {
                             class="h-8 w-8"
                             :class="{
                                 'bg-accent text-accent-foreground':
-                                    leftSidebarOpen,
+                                    leftSidebarOpen &&
+                                    activeLeftTab === 'components',
                             }"
-                            :aria-label="
-                                leftSidebarOpen
-                                    ? 'Collapse Component Library'
-                                    : 'Expand Component Library'
-                            "
-                            @click="emit('toggleLeftSidebar')"
+                            aria-label="Component Library"
+                            @click="emit('selectLeftTab', 'components')"
                         >
                             <LayoutGrid class="h-4 w-4" />
                         </Button>
@@ -168,9 +173,39 @@ const getStatusBadge = (status: string) => {
                     <TooltipContent side="bottom">
                         <p class="text-xs">
                             {{
-                                leftSidebarOpen
+                                leftSidebarOpen &&
+                                activeLeftTab === 'components'
                                     ? 'Collapse Components (Ctrl+B)'
                                     : 'Expand Components (Ctrl+B)'
+                            }}
+                        </p>
+                    </TooltipContent>
+                </Tooltip>
+
+                <!-- Layers Panel Trigger -->
+                <Tooltip>
+                    <TooltipTrigger as-child>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            class="h-8 w-8"
+                            :class="{
+                                'bg-accent text-accent-foreground':
+                                    leftSidebarOpen &&
+                                    activeLeftTab === 'layers',
+                            }"
+                            aria-label="Layers Panel"
+                            @click="emit('selectLeftTab', 'layers')"
+                        >
+                            <Layers class="h-4 w-4" />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                        <p class="text-xs">
+                            {{
+                                leftSidebarOpen && activeLeftTab === 'layers'
+                                    ? 'Collapse Layers'
+                                    : 'Expand Layers'
                             }}
                         </p>
                     </TooltipContent>
@@ -215,6 +250,7 @@ const getStatusBadge = (status: string) => {
                                 :disabled="!canEdit || !canUndo"
                                 class="h-8 w-8"
                                 aria-label="Undo"
+                                data-testid="undo-btn"
                                 @click="emit('undo')"
                             >
                                 <Undo2 class="h-3.5 w-3.5" />
@@ -233,6 +269,7 @@ const getStatusBadge = (status: string) => {
                                 :disabled="!canEdit || !canRedo"
                                 class="h-8 w-8"
                                 aria-label="Redo"
+                                data-testid="redo-btn"
                                 @click="emit('redo')"
                             >
                                 <Redo2 class="h-3.5 w-3.5" />
@@ -316,6 +353,7 @@ const getStatusBadge = (status: string) => {
                             variant="ghost"
                             size="sm"
                             class="hidden h-8 gap-1 text-xs md:inline-flex"
+                            data-testid="preview-btn"
                             @click="emit('preview')"
                         >
                             <Eye class="h-3.5 w-3.5" />
@@ -329,12 +367,36 @@ const getStatusBadge = (status: string) => {
                     </TooltipContent>
                 </Tooltip>
 
+                <Tooltip>
+                    <TooltipTrigger as-child>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            class="hidden h-8 gap-1 text-xs md:inline-flex"
+                            data-testid="share-preview-btn"
+                            aria-label="Share Preview Link"
+                            @click="emit('sharePreview')"
+                        >
+                            <LinkIcon class="h-3.5 w-3.5" />
+                            <span>Share</span>
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                        <p class="text-xs">
+                            Generate expiring signed preview link for
+                            stakeholders
+                        </p>
+                    </TooltipContent>
+                </Tooltip>
+
                 <Tooltip v-if="canEdit">
                     <TooltipTrigger as-child>
                         <Button
                             variant="outline"
                             size="sm"
                             class="h-8 gap-1 text-xs"
+                            data-testid="save-as-template-btn"
+                            aria-label="Save as Template"
                             @click="emit('saveAsTemplate')"
                         >
                             <Bookmark class="h-3.5 w-3.5" />
@@ -356,6 +418,8 @@ const getStatusBadge = (status: string) => {
                             variant="ghost"
                             size="sm"
                             class="h-8 gap-1 text-xs"
+                            data-testid="revisions-btn"
+                            aria-label="Revision history"
                             @click="emit('openRevisions')"
                         >
                             <History class="h-3.5 w-3.5" />
@@ -375,6 +439,29 @@ const getStatusBadge = (status: string) => {
                             variant="ghost"
                             size="sm"
                             class="h-8 gap-1 text-xs"
+                            data-testid="releases-btn"
+                            aria-label="Public release history"
+                            @click="emit('openReleases')"
+                        >
+                            <UploadCloud class="h-3.5 w-3.5" />
+                            <span class="hidden md:inline">Releases</span>
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                        <p class="text-xs">
+                            View public release history and instant rollback
+                        </p>
+                    </TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                    <TooltipTrigger as-child>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            class="h-8 gap-1 text-xs"
+                            data-testid="seo-btn"
+                            aria-label="Page SEO settings"
                             @click="emit('openSeo')"
                         >
                             <Globe class="h-3.5 w-3.5" />
@@ -395,6 +482,18 @@ const getStatusBadge = (status: string) => {
                             variant="outline"
                             size="sm"
                             :disabled="isSaving"
+                            data-testid="save-btn"
+                            :aria-label="
+                                isSaving
+                                    ? 'Saving document...'
+                                    : saveStatus === 'conflict'
+                                      ? 'Conflict detected — click to resolve'
+                                      : saveStatus === 'error'
+                                        ? 'Save error occurred — click to retry'
+                                        : isDirty
+                                          ? 'Save draft changes'
+                                          : 'All changes saved'
+                            "
                             class="h-8 gap-1.5 text-xs transition-colors"
                             :class="{
                                 'border-destructive/40 text-destructive':
@@ -453,12 +552,39 @@ const getStatusBadge = (status: string) => {
                     </TooltipContent>
                 </Tooltip>
 
+                <Tooltip v-if="canEdit && page.status === 'published'">
+                    <TooltipTrigger as-child>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            class="h-8 gap-1 text-xs text-amber-600 hover:bg-amber-50 hover:text-amber-700 dark:text-amber-400 dark:hover:bg-amber-950/30"
+                            data-testid="unpublish-btn"
+                            aria-label="Unpublish page"
+                            @click="emit('unpublish')"
+                        >
+                            <EyeOff class="h-3.5 w-3.5" />
+                            <span class="hidden xl:inline">Unpublish</span>
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                        <p class="text-xs">
+                            Take public page offline (revert to draft)
+                        </p>
+                    </TooltipContent>
+                </Tooltip>
+
                 <Tooltip v-if="canEdit">
                     <TooltipTrigger as-child>
                         <Button
                             variant="default"
                             size="sm"
                             :disabled="isPublishing || isSaving"
+                            data-testid="publish-btn"
+                            :aria-label="
+                                isPublishing
+                                    ? 'Publishing page...'
+                                    : 'Compile and publish static release'
+                            "
                             class="h-8 gap-1.5 bg-primary text-xs text-primary-foreground transition-all hover:bg-primary/90"
                             @click="emit('publish')"
                         >

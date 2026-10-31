@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { useDocumentState } from '@/composables/useDocumentState';
 import { useEditorHistory } from '@/composables/useEditorHistory';
+import type { DocumentSchema } from '@/types/document';
 
 describe('useEditorHistory', () => {
     it('pushes snapshots, undos, and redos correctly', () => {
@@ -131,6 +132,61 @@ describe('useEditorHistory', () => {
         history.redo();
         const redoNode = document.value.root.children![0].children![0];
         expect(redoNode.styles?.mobile?.align).toBe('center');
+    });
+
+    it('leaves document and history stacks unchanged when a snapshot is rejected', () => {
+        const { document, setDocument } = useDocumentState();
+        const history = useEditorHistory(
+            () => document.value,
+            (restored) => setDocument(restored),
+        );
+        const invalidSnapshot: DocumentSchema = {
+            schemaVersion: 1,
+            root: {
+                id: 'duplicate_id',
+                type: 'Section',
+                props: { padding: 'medium', background: 'transparent' },
+                children: [
+                    {
+                        id: 'duplicate_id',
+                        type: 'Divider',
+                        props: { style: 'solid', color: 'muted' },
+                    },
+                ],
+            },
+        };
+        history.past.value.push(invalidSnapshot);
+        const before = JSON.stringify(document.value);
+
+        expect(history.undo()).toBe(false);
+        expect(JSON.stringify(document.value)).toBe(before);
+        expect(history.past.value).toEqual([invalidSnapshot]);
+        expect(history.future.value).toEqual([]);
+    });
+
+    it('undoes and redoes a valid reparent without changing the moved node ID', () => {
+        const { document, insertNode, moveNode, findNode, setDocument } =
+            useDocumentState();
+        const history = useEditorHistory(
+            () => document.value,
+            (restored) => setDocument(restored),
+        );
+        const sourceParentId = document.value.root.children![0].id;
+        insertNode('Container', document.value.root.id, 'inside');
+        const targetParentId = document.value.root.children![1].id;
+        insertNode('Heading', sourceParentId, 'inside');
+        const movedNodeId = document.value.root.children![0].children![0].id;
+        const beforeMove = JSON.parse(JSON.stringify(document.value));
+
+        expect(moveNode(movedNodeId, targetParentId, 0).success).toBe(true);
+        history.pushSnapshot(beforeMove);
+        expect(findNode(movedNodeId)?.parent?.id).toBe(targetParentId);
+
+        expect(history.undo()).toBe(true);
+        expect(findNode(movedNodeId)?.parent?.id).toBe(sourceParentId);
+
+        expect(history.redo()).toBe(true);
+        expect(findNode(movedNodeId)?.parent?.id).toBe(targetParentId);
     });
 });
 

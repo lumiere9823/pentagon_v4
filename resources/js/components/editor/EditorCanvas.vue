@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { Monitor, Smartphone, Tablet } from '@lucide/vue';
 import NodeRenderer from './canvas/NodeRenderer.vue';
 import { VIEWPORT_PRESETS } from '@/config/editor';
@@ -61,10 +61,44 @@ const handleCanvasBackgroundClick = (e: MouseEvent) => {
         emit('clearSelection');
     }
 };
+
+const canvasContainerRef = ref<HTMLElement | null>(null);
+
+function scrollToNode(nodeId: string) {
+    if (!canvasContainerRef.value) return;
+    const el = canvasContainerRef.value.querySelector(
+        `[data-node-id="${nodeId}"]`,
+    ) as HTMLElement | null;
+    if (!el) return;
+
+    const container = canvasContainerRef.value;
+    const containerRect = container.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+
+    const isAbove = elRect.top < containerRect.top;
+    const isBelow = elRect.bottom > containerRect.bottom;
+
+    if (isAbove || isBelow) {
+        const prefersReducedMotion =
+            typeof window !== 'undefined' &&
+            window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+        el.scrollIntoView({
+            behavior: prefersReducedMotion ? 'auto' : 'smooth',
+            block: 'nearest',
+            inline: 'nearest',
+        });
+    }
+}
+
+defineExpose({
+    scrollToNode,
+});
 </script>
 
 <template>
     <main
+        ref="canvasContainerRef"
         class="relative flex flex-1 flex-col overflow-auto bg-muted/40 p-4 sm:p-6"
         aria-label="Editor Canvas Surface"
         @click="handleCanvasBackgroundClick"

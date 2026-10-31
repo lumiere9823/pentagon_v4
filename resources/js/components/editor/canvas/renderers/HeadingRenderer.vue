@@ -6,11 +6,19 @@ const props = withDefaults(
         text?: string;
         level?: number;
         align?: 'left' | 'center' | 'right';
+        blockSpacing?: 'none' | 'small' | 'medium' | 'large';
+        maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
+        fontSize?: 'semantic' | 'small' | 'medium' | 'large' | 'xlarge';
+        textColor?: 'foreground' | 'soft' | 'muted' | 'primary';
     }>(),
     {
         text: 'Heading',
         level: 2,
         align: 'left',
+        blockSpacing: 'small',
+        maxWidth: 'full',
+        fontSize: 'semantic',
+        textColor: 'foreground',
     },
 );
 
