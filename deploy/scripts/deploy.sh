@@ -2,19 +2,48 @@
 # ==============================================================================
 # Pentagon Page Builder - Zero-Downtime Atomic Deployment Script
 # ==============================================================================
-# Usage: ./deploy.sh [git_branch_or_tag] (default: master)
+# Usage: PENTAGON_REPOSITORY_URL=<git-url> ./deploy.sh [git_branch_or_tag]
 
 set -euo pipefail
 
 # Configuration
-APP_ROOT="/var/www/pentagon"
+APP_ROOT="${PENTAGON_APP_ROOT:-/var/www/pentagon}"
 RELEASES_DIR="$APP_ROOT/releases"
 SHARED_DIR="$APP_ROOT/shared"
 CURRENT_LINK="$APP_ROOT/current"
 TIMESTAMP=$(date +"%Y%m%d%H%M%S")
 NEW_RELEASE_DIR="$RELEASES_DIR/$TIMESTAMP"
 TARGET_BRANCH="${1:-master}"
-KEEP_RELEASES=5
+REPOSITORY_URL="${PENTAGON_REPOSITORY_URL:-}"
+PHP_FPM_SERVICE="${PENTAGON_PHP_FPM_SERVICE:-php8.4-fpm}"
+KEEP_RELEASES="${PENTAGON_KEEP_RELEASES:-5}"
+
+if [ -z "$REPOSITORY_URL" ]; then
+    echo "ERROR: PENTAGON_REPOSITORY_URL must contain the repository clone URL." >&2
+    exit 1
+fi
+if ! [[ "$KEEP_RELEASES" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: PENTAGON_KEEP_RELEASES must be a positive integer." >&2
+    exit 1
+fi
+if [[ "$TARGET_BRANCH" == -* ]] || [[ "$TARGET_BRANCH" == *".."* ]]; then
+    echo "ERROR: Invalid branch or tag name: $TARGET_BRANCH" >&2
+    exit 1
+fi
+
+reload_php_fpm() {
+    if command -v systemctl >/dev/null 2>&1; then
+        sudo systemctl reload "$PHP_FPM_SERVICE"
+    fi
+}
+
+activate_release() {
+    local release_dir="$1"
+    local pending_link="$APP_ROOT/.current-$TIMESTAMP"
+
+    ln -s "$release_dir" "$pending_link"
+    mv -Tf "$pending_link" "$CURRENT_LINK"
+}
 
 echo "=== [1/8] Starting Deployment: $TIMESTAMP on branch: $TARGET_BRANCH ==="
 
@@ -24,7 +53,11 @@ if [ ! -f "$SHARED_DIR/.env" ]; then
     exit 1
 fi
 
-mkdir -p "$NEW_RELEASE_DIR"
+mkdir -p "$RELEASES_DIR"
+if ! mkdir "$NEW_RELEASE_DIR"; then
+    echo "ERROR: Release directory already exists: $NEW_RELEASE_DIR" >&2
+    exit 1
+fi
 mkdir -p "$SHARED_DIR/storage/app/public"
 mkdir -p "$SHARED_DIR/storage/framework/cache"
 mkdir -p "$SHARED_DIR/storage/framework/sessions"
@@ -33,7 +66,7 @@ mkdir -p "$SHARED_DIR/storage/logs"
 
 # 2. Clone / Export latest code
 echo "=== [2/8] Exporting application code ==="
-git clone --depth 1 --branch "$TARGET_BRANCH" https://github.com/pentagon/page-builder.git "$NEW_RELEASE_DIR"
+git clone --depth 1 --branch "$TARGET_BRANCH" -- "$REPOSITORY_URL" "$NEW_RELEASE_DIR"
 
 cd "$NEW_RELEASE_DIR"
 
@@ -64,11 +97,8 @@ php artisan view:cache
 echo "=== [7/8] Activating release via atomic symlink ==="
 PREVIOUS_RELEASE=$(readlink -f "$CURRENT_LINK" 2>/dev/null || echo "")
 
-ln -sfn "$NEW_RELEASE_DIR" "$CURRENT_LINK"
-
-if command -v systemctl >/dev/null 2>&1; then
-    sudo systemctl reload php8.4-fpm || sudo systemctl reload php-fpm
-fi
+activate_release "$NEW_RELEASE_DIR"
+reload_php_fpm
 
 # 8. Post-deploy health verification
 echo "=== [8/8] Verifying production health check ==="
@@ -77,10 +107,8 @@ if php "$CURRENT_LINK/artisan" app:production-health-check; then
 else
     echo "CRITICAL: Health check FAILED! Initiating automatic rollback..." >&2
     if [ -n "$PREVIOUS_RELEASE" ] && [ -d "$PREVIOUS_RELEASE" ]; then
-        ln -sfn "$PREVIOUS_RELEASE" "$CURRENT_LINK"
-        if command -v systemctl >/dev/null 2>&1; then
-            sudo systemctl reload php8.4-fpm || sudo systemctl reload php-fpm
-        fi
+        activate_release "$PREVIOUS_RELEASE"
+        reload_php_fpm
         echo "Rolled back to previous release: $PREVIOUS_RELEASE"
     fi
     exit 1

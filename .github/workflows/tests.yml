@@ -65,6 +65,16 @@ jobs:
       - name: Build frontend assets
         run: npm run build
 
+      - name: Verify backup and restore scripts
+        run: |
+          bash -n deploy/scripts/backup.sh
+          bash -n deploy/scripts/restore-rehearsal.sh
+          bash -n deploy/scripts/deploy.sh
+          bash -n deploy/scripts/rollback.sh
+          bash tests/Scripts/BackupScriptTest.sh
+          bash tests/Scripts/RestoreRehearsalScriptTest.sh
+          bash tests/Scripts/DeploymentScriptGuardTest.sh
+
       - name: Prepare disposable PostgreSQL database
         run: php artisan migrate:fresh --force
         env:

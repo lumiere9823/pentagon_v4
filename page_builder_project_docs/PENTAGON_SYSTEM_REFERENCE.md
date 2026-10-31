@@ -1580,16 +1580,16 @@ Schedule::command('releases:reconcile')->everyThirtyMinutes(); // staging-ttl=15
 ### 17.2 Deploy không downtime (D-044) — `deploy/scripts/deploy.sh [branch]`
 
 ```bash
-sudo -u www-data /var/www/pentagon/deploy/scripts/deploy.sh master
+sudo -u www-data env PENTAGON_REPOSITORY_URL=<git-url> /var/www/pentagon/deploy/scripts/deploy.sh master
 ```
 
 1. Kiểm tra `shared/.env` tồn tại; tạo cây `shared/storage/...`.
-2. `git clone --depth 1 --branch $BRANCH` vào `releases/$TIMESTAMP`.
+2. `git clone --depth 1 --branch $BRANCH` từ `PENTAGON_REPOSITORY_URL` vào `releases/$TIMESTAMP`.
 3. Symlink `shared/.env` và `shared/storage` vào release.
 4. `composer install --no-dev --optimize-autoloader`.
 5. `npm ci && npm run build`, sau đó xoá `node_modules`.
 6. `php artisan migrate --force --isolated`; `config:cache`, `route:cache`, `view:cache`.
-7. `ln -sfn` đổi `current` sang release mới; `systemctl reload php8.4-fpm`.
+7. Tạo symlink tạm rồi `mv -T` nguyên tử để đổi `current` sang release mới; reload service từ `PENTAGON_PHP_FPM_SERVICE` (mặc định `php8.4-fpm`).
 8. `app:production-health-check`. Lỗi → **tự động trỏ symlink về release trước**, reload, rồi exit 1.
 9. Xoá release cũ, chỉ giữ 5 bản gần nhất.
 

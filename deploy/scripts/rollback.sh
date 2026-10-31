@@ -6,9 +6,24 @@
 
 set -euo pipefail
 
-APP_ROOT="/var/www/pentagon"
+APP_ROOT="${PENTAGON_APP_ROOT:-/var/www/pentagon}"
 RELEASES_DIR="$APP_ROOT/releases"
 CURRENT_LINK="$APP_ROOT/current"
+PHP_FPM_SERVICE="${PENTAGON_PHP_FPM_SERVICE:-php8.4-fpm}"
+
+reload_php_fpm() {
+    if command -v systemctl >/dev/null 2>&1; then
+        sudo systemctl reload "$PHP_FPM_SERVICE"
+    fi
+}
+
+activate_release() {
+    local release_dir="$1"
+    local pending_link="$APP_ROOT/.current-rollback-$$"
+
+    ln -s "$release_dir" "$pending_link"
+    mv -Tf "$pending_link" "$CURRENT_LINK"
+}
 
 if [ ! -L "$CURRENT_LINK" ]; then
     echo "ERROR: Current symlink $CURRENT_LINK not found!" >&2
@@ -19,6 +34,10 @@ ACTIVE_RELEASE=$(readlink -f "$CURRENT_LINK")
 echo "Active release is: $ACTIVE_RELEASE"
 
 if [ -n "${1:-}" ]; then
+    if ! [[ "$1" =~ ^[0-9]{14}$ ]]; then
+        echo "ERROR: Target release must be a 14-digit deployment timestamp." >&2
+        exit 1
+    fi
     TARGET_RELEASE="$RELEASES_DIR/$1"
 else
     # Find second newest release directory
@@ -37,12 +56,19 @@ fi
 echo "Rolling back to: $TARGET_RELEASE"
 
 # Atomically switch symlink
-ln -sfn "$TARGET_RELEASE" "$CURRENT_LINK"
+TARGET_RELEASE=$(cd "$TARGET_RELEASE" && pwd -P)
+case "$TARGET_RELEASE" in
+    "$RELEASES_DIR"/*) ;;
+    *)
+        echo "ERROR: Target release resolves outside $RELEASES_DIR." >&2
+        exit 1
+        ;;
+esac
+
+activate_release "$TARGET_RELEASE"
 
 # Reload PHP-FPM
-if command -v systemctl >/dev/null 2>&1; then
-    sudo systemctl reload php8.4-fpm || sudo systemctl reload php-fpm
-fi
+reload_php_fpm
 
 # Clear and re-cache on the rolled-back target
 cd "$CURRENT_LINK"
