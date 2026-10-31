@@ -1,9 +1,7 @@
 name: tests
 
 on:
-  push:
-    branches:
-      - main
+  push: {}
   pull_request:
 
 permissions:
@@ -12,6 +10,21 @@ permissions:
 jobs:
   ci:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: pentagon_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pentagon_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout code
@@ -23,6 +36,7 @@ jobs:
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: '8.3'
+          extensions: pdo_pgsql
           tools: composer:v2
           coverage: none
 
@@ -31,8 +45,38 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Setup Application
-        run: composer setup
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Prepare application
+        run: |
+          cp .env.example .env
+          php artisan key:generate
 
       - name: Run CI Checks
         run: composer ci:check
+
+      - name: Run frontend tests
+        run: npm run test:frontend
+
+      - name: Build frontend assets
+        run: npm run build
+
+      - name: Prepare disposable PostgreSQL database
+        run: php artisan migrate:fresh --force
+        env:
+          APP_ENV: testing
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: pentagon_test
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+
+      - name: Run PostgreSQL concurrency tests
+        run: php artisan test -c phpunit.pgsql.xml
+        env:
+          DB_PASSWORD: postgres

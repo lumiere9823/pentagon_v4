@@ -9,11 +9,14 @@ set -euo pipefail
 BACKUP_DEST="${1:-/var/backups/pentagon}"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 BACKUP_DIR="$BACKUP_DEST/$TIMESTAMP"
-APP_ROOT="/var/www/pentagon"
+APP_ROOT="${APP_ROOT_OVERRIDE:-/var/www/pentagon}"
 SHARED_STORAGE="$APP_ROOT/shared/storage"
-KEEP_DAYS=7
 
-mkdir -p "$BACKUP_DIR"
+mkdir -p "$BACKUP_DEST"
+if ! mkdir "$BACKUP_DIR"; then
+    echo "ERROR: Backup directory already exists; refusing to overwrite: $BACKUP_DIR" >&2
+    exit 1
+fi
 
 echo "=== [1/4] Starting Backup: $TIMESTAMP -> $BACKUP_DIR ==="
 
@@ -38,17 +41,21 @@ pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USERNAME" -F c -b -v -f "$DUMP_FILE"
 # 2. Archive Media Assets and Static Releases
 echo "=== [3/4] Archiving media assets and static page releases ==="
 MEDIA_ARCHIVE="$BACKUP_DIR/media_and_releases_${TIMESTAMP}.tar.gz"
-if [ -d "$SHARED_STORAGE/app" ]; then
-    tar -czf "$MEDIA_ARCHIVE" -C "$SHARED_STORAGE/app" public/media page_releases 2>/dev/null || true
+for required_path in public/media private/releases; do
+    if [ ! -d "$SHARED_STORAGE/app/$required_path" ]; then
+        echo "ERROR: Required backup source is missing: $SHARED_STORAGE/app/$required_path" >&2
+        exit 1
+    fi
+done
+
+if ! tar -czf "$MEDIA_ARCHIVE" -C "$SHARED_STORAGE/app" public/media private/releases; then
+    echo "ERROR: Failed to archive media assets and static page releases." >&2
+    exit 1
 fi
 
 # 3. Compute SHA-256 Checksums for integrity verification
 echo "=== [4/4] Generating SHA-256 checksums ==="
 cd "$BACKUP_DIR"
 sha256sum * > SHA256SUMS
-
-# Rotate older backups beyond retention period
-echo "Rotating backups older than $KEEP_DAYS days in $BACKUP_DEST..."
-find "$BACKUP_DEST" -mindepth 1 -maxdepth 1 -type d -mtime +$KEEP_DAYS -exec rm -rf {} +
 
 echo "=== Backup completed successfully at $BACKUP_DIR ==="
