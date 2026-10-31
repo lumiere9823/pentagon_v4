@@ -53,7 +53,7 @@ Pentagon là một **Page Builder Admin**. Người quản trị tạo và quả
 |---|---|
 | **Owner** | Toàn quyền website: sửa/xoá website, quản lý thành viên, mọi quyền của Editor. Owner chính (`websites.owner_id`) không thể bị đổi role hoặc bị xoá khỏi website. |
 | **Editor** | Tạo/sửa/xoá page, chỉnh nội dung trong builder, autosave, publish, rollback, quản lý media và custom template. |
-| **Viewer** | Chỉ đọc: mở builder ở chế độ read-only, preview, xem revision/release/media/template. *(Xem [§21](#21-hạn-chế-đã-biết-và-khoảng-trống): viewer hiện vẫn sửa/xoá được form submission.)* |
+| **Viewer** | Chỉ đọc: mở builder ở chế độ read-only, preview, xem revision/release/media/template/submission; không được mutation dữ liệu. |
 
 ### 1.3 Phạm vi đã hiện thực (MVP)
 
@@ -297,7 +297,7 @@ Phía client có bộ sanitize song song là `resources/js/lib/domSanitizer.ts` 
 
 ### 3.6 Versioning schema
 
-Hiện **chưa có pipeline migration schema**. `SUPPORTED_SCHEMA_VERSIONS = [1]`, mọi writer ghi cứng `schema_version = 1`, release và revision ghi `renderer_version = 1`.
+Hiện **chưa có pipeline migration schema**. `SUPPORTED_SCHEMA_VERSIONS = [1]`, mọi writer vẫn ghi `schema_version = 1`. Release cũ dùng `renderer_version = 1`; release tạo từ Phase 2B dùng `renderer_version = 2` để đánh dấu responsive rendering/publish preflight mới. Không có migration hoặc sửa release cũ.
 
 Khi cần v2, phải:
 
@@ -519,7 +519,7 @@ mobile  = styles.mobile[key] ?? styles.tablet[key] ?? props[key]
 | `display` | Chỉ nhận `visible` hoặc `hidden` |
 | Prop khác | Validate kiểu/enum bằng `validateSingleProp` theo schema gốc |
 
-Allowlist (giống hệt ở PHP và `lib/responsive.ts`):
+Allowlist canonical nằm ở `ComponentRegistry::RESPONSIVE_OVERRIDABLE_PROPS`; breakpoint canonical nằm ở `ComponentRegistry::RESPONSIVE_BREAKPOINTS`. `GET /api/components/registry` trả cả hai trong field `responsive`, và editor gọi `configureResponsiveContract()` sau khi fetch. `lib/responsive.ts` giữ fallback tương đương để render an toàn trước khi request hoàn tất:
 
 ```ts
 Section:['padding','background']  Container:['maxWidth','centered']  Heading:['align']
@@ -538,6 +538,9 @@ Columns:['count','gap']  CardGrid:['columns','gap']  FAQ:[]  Spacer:['size']  Di
 | `getInheritedPropInfo(node, key, vp)` | `{value, source:'tablet'|'desktop'}` cho nhãn "Inherited from …" |
 | `isResponsiveProp(type, key)` | `key === 'display'` hoặc key nằm trong allowlist |
 | `COMPONENT_DISPLAY_MODES`, `RESPONSIVE_DISPLAY_CLASSES` | Hằng chuỗi class tĩnh để Tailwind quét và biên dịch |
+| `RESPONSIVE_BREAKPOINTS` | Contract public: tablet 768 px, desktop 1024 px; độc lập preset canvas desktop 1280 px |
+| `configureResponsiveContract(contract)` | Hydrate allowlist + breakpoint từ Component Registry API, tránh editor tự định nghĩa một hệ breakpoint khác |
+| `buildEditorResponsivePresentation(node, vp)` | Ánh xạ enum đã validate thành inline presentation cho viewport đang mô phỏng, không phụ thuộc kích thước cửa sổ thật |
 
 **Luồng chỉnh sửa:**
 
@@ -547,28 +550,24 @@ Columns:['count','gap']  CardGrid:['columns','gap']  FAQ:[]  Spacer:['size']  Di
 4. Reset → `resetNodeStyle` xoá key, rồi xoá viewport rỗng, rồi xoá `styles` rỗng.
 5. Mọi thay đổi đi qua `recordDebouncedEdit` nên đều undo được.
 
-Trên canvas, `NodeRenderer` gọi `resolveAllResponsiveProps(node, viewport)`, bỏ `display` ra trước khi `v-bind` vào renderer, và dùng `display` để vẽ trạng thái "ẩn trên viewport này". Node bị ẩn vẫn nằm trong DOM editor (viền nét đứt, badge "Hidden on {viewport}") để còn chọn được.
+Trên canvas, `NodeRenderer` gọi `resolveAllResponsiveProps(node, viewport)`, bỏ `display` ra trước khi `v-bind` vào renderer, và dùng `display` để vẽ trạng thái "ẩn trên viewport này". `buildEditorResponsivePresentation` bổ sung style root/content theo viewport đã chọn, nên padding, alignment, grid count/gap, typography và các property responsive được hỗ trợ không còn lấy breakpoint từ cửa sổ thật. Node bị ẩn vẫn nằm trong DOM editor (viền nét đứt, badge "Hidden on {viewport}") để còn chọn được.
 
 ### 5.4 CSS được tạo ra thế nào
 
-**Không có CSS nào được sinh từ giá trị style.** Không có inline style, không có CSS variable. Mọi giá trị là enum token được ánh xạ sang class Tailwind cố định; CSS của các class đó nằm trong `app.css` đã build.
+- Base markup vẫn dùng class Tailwind hiện hữu. Nếu node không có responsive override, renderer không sinh thêm CSS và hành vi desktop cũ được giữ nguyên.
+- Nếu `styles.tablet`/`styles.mobile` có key trong allowlist, `DocumentHtmlRenderer` ánh xạ **chỉ enum đã validate** thành rule CSS theo selector `[id="node-id"]`; không nối giá trị CSS tự do từ document.
+- Rule mobile là mặc định, tablet nằm trong `@media (min-width: 768px)`, desktop trong `@media (min-width: 1024px)`. Mobile kế thừa tablet khi không có override riêng; desktop luôn quay về `props` base.
+- CSS responsive được đặt trong `<style data-pb-responsive>` ở `<head>` của document đầy đủ và nằm trong `html_hash` release. `render()` fragment cũng trả style block để unit/consumer fragment thấy đúng output.
+- Các target con như Image `<img>`, Button `<a>` và Divider `<hr>` dùng selector cố định do renderer tạo. URL/HTML sanitization không bị nới lỏng.
 
-Khi publish, `DocumentHtmlRenderer::resolveResponsiveClasses($node)` **chỉ đọc `display`**:
+Breakpoint public: mobile `< 768px`, tablet `768–1023px`, desktop `≥ 1024px`. Preset editor vẫn là 375 / 768 / 1280 px; 1280 chỉ là kích thước canvas desktop.
 
-```php
-if ($mobile === 'hidden' && $tablet === 'hidden') $classes[] = "hidden lg:{$intrinsic}";
-elseif ($mobile === 'hidden')                     $classes[] = "hidden md:{$intrinsic}";
-elseif ($tablet === 'hidden')                     $classes[] = "{$intrinsic} md:hidden lg:{$intrinsic}";
-```
+### 5.5 Parity editor ↔ publish
 
-Breakpoint trên trang public: mobile `< md (768px)`, tablet `md–lg (768–1023px)`, desktop `≥ lg (1024px)`. Preset của editor là 375 / 768 / 1280 px.
-
-### 5.5 Độ lệch editor ↔ publish (cần biết khi phát triển)
-
-1. **Override khác `display` không được publish.** Các giá trị như `styles.mobile.count` hay `styles.tablet.align` được validate, lưu và hiển thị trên canvas, nhưng `DocumentHtmlRenderer` chỉ đọc `props`.
-2. **Cascade "tablet hidden" lệch nhau.** Editor cho mobile kế thừa `hidden` từ tablet. Server với `tablet=hidden` và mobile không đặt sinh ra `{intrinsic} md:hidden lg:{intrinsic}`, nên **mobile vẫn hiển thị**.
-3. Không thể ẩn node trên desktop. Hằng `desktopHidden` tồn tại nhưng không được dùng.
-4. Canvas chỉ **mô phỏng** viewport bằng cách thu hẹp khung. Các class `sm:/md:/lg:` trong renderer phản ứng theo **cửa sổ trình duyệt thật**, không theo khung 375/768 px (không dùng container queries).
+1. Property ngoài allowlist vẫn bị validator từ chối; không phải mọi component hỗ trợ mọi property.
+2. `tablet=hidden` kế thừa xuống mobile; `styles.mobile.display='visible'` reset lại riêng mobile. Desktop không có bucket override trong schema và giữ base visible.
+3. Canvas dùng inline presentation theo viewport logic để vô hiệu ảnh hưởng của kích thước cửa sổ thật đối với các class `sm:/md:/lg:` nội bộ.
+4. Test contract gồm TS cascade/breakpoint/editor presentation và PHP HTML/CSS thực tế cho đủ 12 component.
 
 ---
 
@@ -665,8 +664,8 @@ const { lockVersion, saveStatus, isDirty, isSaving, lastSavedAt, errorMessage, c
 
 **Publish (`handlePublish`):**
 
-1. Nếu dirty → `await saveNow('Pre-publish autosave', false)`. ⚠️ Kết quả bị bỏ qua: lưu lỗi hoặc conflict vẫn tiếp tục publish bản đang có trên server.
-2. `POST /websites/{w}/pages/{p}/publish`.
+1. Nếu trạng thái save khác `saved` → `await saveNow('Pre-publish autosave', false)`; kết quả `false`, conflict hoặc exception dừng publish và giữ thông báo lỗi/conflict.
+2. Chỉ sau khi draft mới nhất đã lưu thành công mới gọi `POST /websites/{w}/pages/{p}/publish`. `isPublishing` được bật trước bước save để chặn kích hoạt lặp.
 3. Thành công → `publishedPublicUrl`, mở `PublishSuccessModal`, gán `props.page.status = 'published'` (sửa trực tiếp object prop).
 4. Thất bại → ghi vào `lastError` (banner lỗi).
 
@@ -1192,7 +1191,7 @@ releases:prune-superseded  → SUPERSEDED cũ → PRUNED (xoá thư mục)
 
 1. `PagePublishingLock::tryLockPage` = `pg_try_advisory_xact_lock((0x505542 << 40) | page_id)` (namespace `'PUB'`). Không lấy được → `PublishConcurrencyException` → **409 `publish_in_progress`**.
 2. Khoá row page `FOR UPDATE`. `document_json` null → lỗi.
-3. Validate draft.
+3. `validateForPublishing()` validate schema rồi chạy semantic preflight. Image `src` rỗng/whitespace → 422 `validation_failed`, `details[]` có node path; draft save và preview vẫn có thể giữ placeholder Image rỗng.
 4. Tính hash chuẩn. Nếu trùng revision mới nhất → **tái dùng** revision đó (idempotent). Nếu khác → tạo revision N+1 "Published release".
 5. `inspectAssetReferences` trên revision đích → MED lock asset ID (tăng dần) → mọi asset phải `ACTIVE`, chưa xoá mềm, đúng website. Nếu không → `MediaUnavailableException` (422).
 6. `ReleaseStagingService::createCandidate()` → release `PENDING`, `release_number = max+1` (dưới khoá row page).
@@ -1221,6 +1220,7 @@ UPDATE pages SET published_revision_id=?, status='published' WHERE id=?;
 |---|---|---|
 | `PublishConcurrencyException` | 409 | `publish_in_progress` |
 | `MediaUnavailableException` | 422 | `media_asset_unavailable` |
+| `PublishValidationException` | 422 | `validation_failed` (+ `details`) |
 | `PublishRenderingException` | 422 | `render_failed` (+ `details`) |
 | `ReleaseStagingException` | 500 | `staging_failed` |
 | khác (gồm `PublishFailedException`) | 500 | `publish_failed` |
@@ -1247,7 +1247,7 @@ releases/{website_id}/{page_id}/r_{release_number}_{hash8}/        ← đã niê
 
    ```json
    { "release_uuid": "…", "page_id": 12, "page_revision_id": 98, "release_number": 7,
-     "schema_version": 1, "renderer_version": 1, "document_hash": "…",
+     "schema_version": 1, "renderer_version": 2, "document_hash": "…",
      "html_bytes": 8894, "html_hash": "sha256…",
      "artifacts": [{ "path": "index.html", "bytes": 8894, "sha256": "…" }],
      "media_asset_ids": [3, 9], "created_at": "2026-10-24T10:00:00+00:00" }
@@ -1272,17 +1272,17 @@ releases/{website_id}/{page_id}/r_{release_number}_{hash8}/        ← đã niê
 ### 10.5 `DocumentHtmlRenderer` — biên dịch AST → HTML5 tĩnh (D-031)
 
 - `render($doc, $previewMode)`:
-  - Validate trước; lỗi → `PublishRenderingException("Document failed Schema v1 validation: …")`.
+  - Preview dùng schema validation thường để giữ placeholder; publish dùng publish validation gồm semantic Image source. Lỗi → `PublishRenderingException` có `details` theo path.
   - Đệ quy `renderNode`: depth > 10 → ném lỗi; type lạ → ném lỗi; chỉ render con khi `allowChildren`; `match` gọi 12 hàm `render{Type}`.
   - **Publish mode:** fail-closed, lỗi ở một node làm hỏng cả bản build.
   - **Preview mode:** node lỗi được thay bằng `<div class="preview-node-error …">[Preview Warning: …]</div>`.
 - **Escape:** mọi text và attribute qua `htmlspecialchars(ENT_QUOTES|ENT_SUBSTITUTE,'UTF-8')`. RichText `content` và FAQ `answer` sanitize lại bằng `HtmlSanitizer`. `Image.src`, `Button.url`, `Hero.ctaUrl` kiểm tra lại bằng `isSafeUrl`.
-- Mỗi phần tử có `id="{node.id}"` và class ẩn/hiện responsive (§5.4).
-- `renderDocument($doc, $meta, $preview)` bọc thành trang HTML5 đầy đủ:
+- Mỗi phần tử có `id="{node.id}"`; responsive rule được tổng hợp theo §5.4.
+- `renderDocument($doc, $meta, $preview, $bodyPrefixHtml)` bọc thành trang HTML5 đầy đủ:
   - `<html lang="en">`, charset, viewport, `<title>` (`meta.title` → `pageSettings.title` → "Published Page"), meta description;
   - canonical; `meta_tags` (đã được `PageSeoManager` escape sẵn);
   - **CSS:** nếu `meta.stylesheet_url` được truyền thì dùng `<link rel="stylesheet">`. Mặc định, renderer **nhúng inline** CSS đã build (`<style>…</style>`): tra entry `resources/css/app.css` trong `public/build/manifest.json` để lấy file có hash (`inlineCompiledStylesheet()`, cache theo process). Lý do: Vite đổi tên file theo hash ở mỗi lần build, và mỗi lần deploy thay toàn bộ `public/build`, nên một release bất biến không được link tới file có thể biến mất. CSS nhúng nằm trong `html_hash` của manifest. Không tìm thấy bản build → `Log::warning` và render không có CSS (không phát ra link chết);
-  - `<body class="min-h-screen bg-white text-gray-900 antialiased">`.
+  - `<body class="min-h-screen bg-white text-gray-900 antialiased">`; `bodyPrefixHtml` chỉ dùng cho markup nội bộ tin cậy như preview banner và được chèn đúng sau opening body tag.
 - **Tất định:** cùng tài liệu luôn cho HTML giống nhau từng byte (có test). Không có JS phía client.
 - Benchmark: tài liệu 51 node render trong khoảng 1,87 ms; phần markup khoảng 8,7 KB, cộng thêm khoảng 135 KB CSS nhúng (khoảng 20 KB sau gzip).
 - **Hệ quả của CSS nhúng:** đổi giao diện (class Tailwind, theme) chỉ có hiệu lực trên trang public sau khi **publish lại**. Class mà renderer PHP dùng phải xuất hiện trong mã nguồn được Tailwind quét (file PHP trong `app/` được quét tự động), nếu không chúng sẽ thiếu trong bản build.
@@ -1305,7 +1305,7 @@ Endpoint: `POST /websites/{w}/pages/{p}/releases/{release}/rollback` (cần quy�
 | `POST …/preview/share-link` (`.share-link`) | Thành viên | Trả `URL::temporarySignedRoute('preview.signed', +60 phút)` + `expires_at` |
 | `GET preview/pages/{page}` (`preview.signed`) | Không cần đăng nhập, chỉ cần chữ ký hợp lệ | Chữ ký sai hoặc hết hạn → 403 |
 
-- Render với `previewMode=true`, tiêu đề "{title} (Preview)", banner amber "PREVIEW MODE". Draft rỗng được thay bằng tài liệu tối thiểu "Draft is empty".
+- Render với `previewMode=true`, tiêu đề "{title} (Preview)", banner amber "PREVIEW MODE" được truyền qua `bodyPrefixHtml`. `<!DOCTYPE html>` luôn là byte đầu tiên; public output không truyền prefix nên không có banner. Draft rỗng được thay bằng tài liệu tối thiểu "Draft is empty".
 - Header: `Cache-Control: no-store, no-cache, must-revalidate, max-age=0, private`, `Pragma: no-cache`, `Expires: 0`, `X-Robots-Tag: noindex, nofollow, noarchive, nosnippet`.
 
 ### 10.8 Phục vụ trang public (`PublicPageController::show`)
@@ -1412,11 +1412,12 @@ Exception trả về JSON khi path là `api/*` hoặc request `expectsJson()`. H
 |---|:-:|:-:|:-:|:-:|
 | Xem website, pages, builder (read-only), preview, revisions, releases, media, templates, submissions | ✔ | ✔ | ✔ | 404/403 |
 | Tạo/sửa/xoá page, lưu nội dung, publish, rollback, upload/sửa/xoá media, CRUD custom template | ✔ | ✔ | ✘ | ✘ |
+| Sửa trạng thái/xoá form submission | ✔ | ✔ | ✘ | ✘ |
 | Sửa/xoá website, quản lý thành viên | ✔ | ✘ | ✘ | ✘ |
 
 - **IDOR → 404, không phải 403** (D-008): truy cập tài nguyên của website khác luôn trả 404 để không lộ sự tồn tại.
 - **Bất biến Owner** (D-006): tạo website và tạo membership owner nằm trong **cùng một transaction**. `WebsiteMembershipPolicy` cấm đổi role hoặc xoá Owner chính. Membership chỉ gán được `editor`/`viewer`; không cấp được `owner` qua API.
-- Policy: `WebsitePolicy`, `WebsiteMembershipPolicy`, `PagePolicy`, `MediaAssetPolicy`, `PageTemplatePolicy`. Tất cả dựa trên `Website::hasMember($user, $roles)` và `getMemberRole()`.
+- Policy: `WebsitePolicy`, `WebsiteMembershipPolicy`, `PagePolicy`, `MediaAssetPolicy`, `PageTemplatePolicy`. Tất cả dựa trên `Website::hasMember($user, $roles)` và `getMemberRole()`; mutation submission dùng `WebsitePolicy::manageFormSubmissions` cho Owner/Editor.
 
 ### 13.3 Bảng route
 
@@ -1602,12 +1603,12 @@ Không có tham số: trỏ `current` về release liền trước. Có tham s�
 
 - `deploy/scripts/backup.sh /var/backups/pentagon` (hằng ngày lúc 02:00):
   - `pg_dump` định dạng custom (`.dump`);
-  - nén `storage/app/public/media` và `storage/app/page_releases`;
+  - nén `storage/app/public/media` và `storage/app/private/releases`;
   - tạo `SHA256SUMS`;
-  - xoá bản backup cũ hơn 7 ngày.
+  - không tự xóa backup cũ; retention phải được vận hành bằng job riêng có kiểm soát.
 - `deploy/scripts/restore-rehearsal.sh`: khôi phục `.dump` mới nhất vào DB tạm `pentagon_rehearsal_restore`, so số row của `pages`, `page_revisions`, `page_releases`, `media_assets`, ghi báo cáo, rồi drop DB tạm. Không đụng dữ liệu thật.
 
-> ⚠️ Release thực tế nằm ở `storage/app/private/releases` (disk `local`), không phải `storage/app/page_releases`. Cần kiểm tra lại đường dẫn trong `backup.sh` (xem §21).
+Script fail rõ ràng nếu media/release source thiếu hoặc `tar` lỗi, và từ chối ghi đè thư mục backup trùng timestamp.
 
 ### 17.5 Nginx (`deploy/nginx/pentagon.conf`, D-046)
 
@@ -1809,11 +1810,11 @@ Các mục dưới đây được xác minh bằng cách đọc code. Mức đ�
 | # | Mức | Vấn đề | Vị trí |
 |---|---|---|---|
 | 1 | ✅ | *Đã sửa (2026-10-24):* trang publish từng link tới `/build/assets/app.css` không tồn tại (Vite sinh `app-*.css`), nên mất toàn bộ CSS. Giờ CSS được nhúng inline (§10.5). **Các release đã publish trước bản sửa vẫn không có CSS: cần publish lại** | `DocumentHtmlRenderer::inlineCompiledStylesheet` |
-| 2 | 🟠 | Override responsive khác `display` (padding, align, count…) **không được publish**, dù editor hiển thị | `DocumentHtmlRenderer` (§5.5) |
-| 3 | 🟠 | Cascade `tablet=hidden` lệch nhau: editor ẩn cả mobile, bản publish vẫn hiện trên mobile | `resolveResponsiveClasses` |
-| 4 | 🟠 | Banner preview bị chèn **trước `<!DOCTYPE html>`**, vì code tìm chuỗi `<body>` trong khi renderer sinh `<body class="…">` | `PagePreviewController` |
-| 5 | 🟠 | Image có `src` rỗng được chấp nhận trong editor nhưng làm publish thất bại (`render_failed`) | `renderImage` |
-| 6 | 🟠 | `handlePublish` vẫn publish khi lưu trước-publish thất bại/conflict (bỏ qua kết quả `saveNow`) | `EditorShell.vue` |
+| 2 | ✅ | *Đã sửa Phase 2B:* responsive property trong allowlist được publish thành CSS enum-safe tại 768/1024; renderer tests bao phủ 12 component | `DocumentHtmlRenderer` (§5.4) |
+| 3 | ✅ | *Đã sửa Phase 2B:* `tablet=hidden` kế thừa xuống mobile; mobile có thể reset `visible`; editor/public dùng cùng cascade | `responsive.ts`, `DocumentHtmlRenderer` |
+| 4 | ✅ | *Đã sửa Phase 2B:* banner được chèn qua `bodyPrefixHtml` bên trong body; DOCTYPE vẫn đứng đầu | `PagePreviewController`, `DocumentHtmlRenderer` |
+| 5 | ✅ | *Đã sửa Phase 2B:* publish preflight trả 422 `validation_failed` với `empty_image_source` và node path; preview placeholder vẫn giữ | `DocumentValidator::validateForPublishing` |
+| 6 | ✅ | *Đã sửa Phase 2A:* publish dừng khi save thất bại/conflict/exception và không gửi POST publish | `EditorShell.vue`, `publishGuard.ts` |
 | 7 | 🟡 | PUB lock chỉ bao Phase 1. Phase 3 dựa vào row lock và partial unique (thực chất là last-writer-wins). Rollback release không lấy PUB lock và không kiểm tra lại media trước khi biên dịch lại (Case B) | `PagePublishingService` |
 | 8 | 🟡 | Class `prose` được dùng nhưng `@tailwindcss/typography` không có trong dependency | RichText/FAQ |
 
@@ -1822,27 +1823,27 @@ Các mục dưới đây được xác minh bằng cách đọc code. Mức đ�
 | # | Mức | Vấn đề | Vị trí |
 |---|---|---|---|
 | 9 | 🟠 | Bản tài liệu đã sanitize bị bỏ: draft và template lưu JSON gốc (không điền default, không chuẩn hoá alias, HTML chưa sanitize lúc lưu). Đầu ra public vẫn an toàn nhờ sanitize lúc render | `PagePersistenceService`, `PageTemplateController` |
-| 10 | 🟠 | Viewer có thể **sửa và xoá form submission** (admin chỉ kiểm tra `view`) | `FormSubmissionAdminController` |
+| 10 | ✅ | *Đã sửa Phase 2A:* Viewer chỉ đọc; Owner/Editor mới được sửa/xoá submission; cross-tenant giữ 404 | `FormSubmissionAdminController`, `WebsitePolicy` |
 | 11 | 🟡 | Xoá website/page không dọn file media và thư mục release. Thư mục đã niêm phong của release FAILED cũng không bị lệnh nào dọn | Cascade + `releases:reconcile` |
 | 12 | 🟡 | Nginx vẫn ánh xạ MIME `svg` trong `/storage/media/` dù SVG bị cấm upload (vô hại, nhưng không nhất quán) | `deploy/nginx/pentagon.conf` |
-| 13 | 🟡 | `backup.sh` nén `storage/app/page_releases`, trong khi release nằm ở `storage/app/private/releases`. Lỗi `tar` bị `\|\| true` nuốt nên backup âm thầm thiếu release. Release dựng lại được từ revision trong DB (Case B), nhưng nên sửa đường dẫn | `deploy/scripts/backup.sh:42` |
-| 14 | 🟡 | Chưa có pipeline migration schema; `MediaAssetStatus::PURGED` và `MediaUnavailableException::$unavailableIds` không được dùng; không có endpoint unpublish | — |
+| 13 | ✅ | *Đã sửa Phase 2A:* archive chứa `private/releases`, lỗi `tar` trả non-zero, fixture checksum/extract restore pass | `deploy/scripts/backup.sh`, `BackupScriptTest.sh` |
+| 14 | 🟡 | Chưa có pipeline migration schema; `MediaAssetStatus::PURGED` và `MediaUnavailableException::$unavailableIds` không được dùng; *Endpoint unpublish đã bổ sung tại `PagePublishingController@unpublish`* | — |
 
 ### 21.3 Editor / UI
 
 | # | Mức | Vấn đề |
 |---|---|---|
-| 15 | 🟠 | Không kéo được node có sẵn để sắp xếp lại hay đổi node cha (chỉ có Move Up/Down). `moveNode` đã có nhưng chưa có UI |
-| 16 | 🟠 | Chưa có: cây layers, component Form, trang media riêng, quản lý template, quản trị submissions, danh sách/rollback release, nút share preview link |
-| 17 | 🟠 | Canvas không mô phỏng breakpoint: class `sm:/md:/lg:` theo cửa sổ thật, không theo khung 375/768 px |
-| 18 | 🟡 | `Esc` bỏ chọn node ngay cả khi đang gõ trong input của Inspector |
-| 19 | 🟡 | Khôi phục revision không xoá lịch sử undo |
-| 20 | 🟡 | Registry bị fetch 2 lần; helper XSRF bị lặp 4 chỗ; Wayfinder chưa được dùng trong builder |
-| 21 | 🟡 | Trường SEO chưa có control: `twitter_card`, `nofollow`, `schema_type`, `structured_data_json` |
-| 22 | 🟡 | Có thể render `AppLayout` hai lần ở `Websites/*`, `Pages/{Create,Edit}` (vừa tự bọc vừa nhận layout mặc định), chưa xác nhận lúc chạy |
-| 23 | 🟡 | Text cũ trong `Pages/Create.vue` vẫn nhắc "Phase 07" (tính năng đã có) |
-| 24 | 🟡 | Code chưa dùng: `useEditorState.searchQuery/selectedCategory/resetFilters`, `canPerformNodeAction`, `clearHistory`, emit `sharePreview`, prop `ConflictModal.serverUpdatedAt`, attribute `mode="select"` truyền cho `MediaLibraryModal` |
-| 25 | 🟡 | Repeater FAQ không chặn giới hạn 20 item phía client; client không kiểm tra prop bắt buộc |
+| 15 | ✅ | *Đã sửa Package 3:* Kéo thả trực quan sắp xếp lại (reorder) và đổi node cha (reparent) trên Canvas và Layers Panel với cycle/depth/count guard |
+| 16 | ✅ | *Đã sửa Package 3 & Phase 5:* Cây Layers Panel, quản lý workspace templates (`Websites/Show.vue`), quản trị submissions (`Websites/Submissions.vue`), danh sách/rollback public releases (`ReleasesModal.vue`), nút share signed preview link (`SharePreviewModal.vue`) |
+| 17 | ✅ | *Đã sửa Phase 2B:* `buildEditorResponsivePresentation` áp presentation theo viewport 375/768/1280, độc lập cửa sổ thật |
+| 18 | ✅ | *Đã sửa Package 3:* `Esc` kiểm tra focused input/textarea/contentEditable và blur trước khi huỷ chọn node |
+| 19 | ✅ | *Đã sửa Phase 3:* Khôi phục revision xoá lịch sử undo và thiết lập boundary thông báo |
+| 20 | ✅ | *Đã sửa Phase 2C:* RegistrySession dùng session-level cache 1 lần fetch; `httpClient.ts` dùng chung CSRF/headers |
+| 21 | ✅ | *Đã sửa Phase 5:* Đầy đủ controls cho `twitter_card`, `nofollow`, `schema_type`, và `structured_data_json` với realtime JSON-LD syntax validator trong `SeoSettingsModal.vue` |
+| 22 | ✅ | *Đã sửa Phase 2C:* `AppLayout` ownership chuẩn hoá; không còn render trùng lặp |
+| 23 | ✅ | *Đã sửa Phase 5:* Làm sạch placeholder text cũ trong `Pages/Create.vue` và `Pages/Edit.vue` |
+| 24 | ✅ | *Đã sửa Phase 5:* Toàn bộ event handlers và modals (`sharePreview`, `clearHistory`, `releases`, `unpublish`) đã được nối hoàn chỉnh |
+| 25 | ✅ | *Đã sửa Phase 3:* Repeater FAQ chặn client 20 items và inspector cung cấp hướng dẫn validation trực tiếp |
 
 ### 21.4 Câu hỏi mở (từ giai đoạn khảo sát)
 
@@ -1902,19 +1903,19 @@ Các mục dưới đây được xác minh bằng cách đọc code. Mức đ�
 |---|---|---|---|
 | 409 | `document_conflict` | `PUT /content` | `lock_version` cũ: có người hoặc tab khác đã lưu |
 | 409 | `publish_in_progress` | `POST /publish` | Đang có publish khác trên page này |
-| 422 | `validation_failed` (+`details[]`) | `PUT /content` | Tài liệu sai schema |
+| 422 | `validation_failed` (+`details[]`) | `PUT /content`, `POST /publish` | Tài liệu sai schema hoặc không publishable; Image rỗng dùng `empty_image_source` + node path |
 | 422 | `media_scan_indeterminate` | Writer | Không xác định được tham chiếu media (fail-closed) |
 | 422 | `media_asset_unavailable` | Writer, publish | Asset thiếu, đã xoá mềm, đang purging hoặc thuộc website khác |
 | 422 | `media_in_use` (+`referencing_pages`) | `DELETE /media` | Asset còn được tham chiếu |
 | 422 | `media_already_pending_deletion` / `media_scan_error` | `DELETE /media` | |
-| 422 | `render_failed` (+`details`) | `POST /publish` | Renderer từ chối (vd. Image rỗng, URL không an toàn) |
+| 422 | `render_failed` (+`details`) | `POST /publish` | Renderer fail-closed trong staging/rollback (vd. URL không an toàn hoặc revision cũ không render được) |
 | 500 | `staging_failed` / `publish_failed` / `rollback_failed` | Publishing | Lỗi đóng gói hoặc lỗi khác |
 | 403 | — | Template global, preview signed hết hạn | |
 | 404 | — | Truy cập chéo tenant (IDOR), page chưa publish | |
 
 ### 23.2 Mã lỗi validator
 
-`max_payload_size_exceeded`, `invalid_json`, `invalid_root_structure`, `missing_schema_version`, `invalid_schema_version_type`, `unsupported_schema_version`, `missing_or_invalid_root`, `missing_root_type`, `invalid_root_component`, `max_nodes_exceeded`, `max_depth_exceeded`, `missing_node_id`, `invalid_node_id_format`, `duplicate_node_id`, `missing_node_type`, `unknown_component_type`, `invalid_props_type`, `invalid_children_type`, `children_not_allowed`, `max_children_exceeded`, `invalid_child_node`, `unknown_prop`, `required_prop_missing`, `invalid_type`, `max_length_exceeded`, `invalid_enum_value`, `unsafe_url`, `min_value_exceeded`, `max_value_exceeded`, `max_items_exceeded`, `invalid_item_type`, `required_field_missing`, `invalid_styles_format`, `invalid_viewport_key`, `disallowed_style_override`.
+`max_payload_size_exceeded`, `invalid_json`, `invalid_root_structure`, `missing_schema_version`, `invalid_schema_version_type`, `unsupported_schema_version`, `missing_or_invalid_root`, `missing_root_type`, `invalid_root_component`, `max_nodes_exceeded`, `max_depth_exceeded`, `missing_node_id`, `invalid_node_id_format`, `duplicate_node_id`, `missing_node_type`, `unknown_component_type`, `invalid_props_type`, `invalid_children_type`, `children_not_allowed`, `max_children_exceeded`, `invalid_child_node`, `unknown_prop`, `required_prop_missing`, `invalid_type`, `max_length_exceeded`, `invalid_enum_value`, `unsafe_url`, `empty_image_source` (publish-only), `min_value_exceeded`, `max_value_exceeded`, `max_items_exceeded`, `invalid_item_type`, `required_field_missing`, `invalid_styles_format`, `invalid_viewport_key`, `disallowed_style_override`.
 
 ### 23.3 Hằng số quan trọng
 
