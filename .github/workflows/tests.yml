@@ -57,14 +57,14 @@ jobs:
           php artisan key:generate
           php artisan wayfinder:generate --with-form
 
+      - name: Build frontend assets
+        run: npm run build
+
       - name: Run CI Checks
         run: composer ci:check
 
       - name: Run frontend tests
         run: npm run test:frontend
-
-      - name: Build frontend assets
-        run: npm run build
 
       - name: Verify backup and restore scripts
         run: |
