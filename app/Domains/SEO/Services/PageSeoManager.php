@@ -2,11 +2,18 @@
 
 namespace App\Domains\SEO\Services;
 
+use App\Domains\Pages\Contracts\PublicPageLocatorInterface;
 use App\Models\Page;
 use App\Models\Website;
 
 class PageSeoManager
 {
+    public function __construct(
+        protected ?PublicPageLocatorInterface $pageLocator = null
+    ) {
+        $this->pageLocator = $pageLocator ?? app(PublicPageLocatorInterface::class);
+    }
+
     /**
      * Clean and normalize SEO metadata structure.
      *
@@ -91,7 +98,7 @@ class PageSeoManager
         // 2. Canonical URL fallback
         $effectiveCanonical = ! empty($seo['canonical_url'])
             ? $seo['canonical_url']
-            : url("/sites/{$website->slug}/{$page->slug}");
+            : $this->pageLocator->getCanonicalUrl($page, $website);
 
         // 3. Robots directive
         if ($seo['noindex']) {

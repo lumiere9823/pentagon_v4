@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Domains\Pages\Contracts\PublicPageLocatorInterface;
 use App\Domains\Publishing\Exceptions\MediaUnavailableException;
 use App\Domains\Publishing\Exceptions\PublishConcurrencyException;
 use App\Domains\Publishing\Exceptions\PublishRenderingException;
@@ -20,7 +21,8 @@ use Throwable;
 class PagePublishingController extends Controller
 {
     public function __construct(
-        protected PagePublishingService $publishingService
+        protected PagePublishingService $publishingService,
+        protected PublicPageLocatorInterface $pageLocator,
     ) {}
 
     /**
@@ -42,10 +44,7 @@ class PagePublishingController extends Controller
                 'success' => true,
                 'message' => 'Page published successfully.',
                 'release' => $release,
-                'public_url' => route('public.sites.pages.show', [
-                    'website' => $website->slug,
-                    'page' => $page->slug,
-                ]),
+                'public_url' => $this->pageLocator->getCanonicalUrl($page, $website),
             ]);
         } catch (PublishConcurrencyException $e) {
             return response()->json([

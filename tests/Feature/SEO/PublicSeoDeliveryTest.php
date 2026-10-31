@@ -21,7 +21,7 @@ test('public sitemap endpoint delivers compliant XML with cache headers', functi
         'role' => 'editor',
     ]);
 
-    $page = Page::factory()->create([
+    $page = Page::factory()->homepage()->create([
         'website_id' => $website->id,
         'title' => 'Home Page',
         'slug' => 'home',
@@ -58,7 +58,8 @@ test('public sitemap endpoint delivers compliant XML with cache headers', functi
 
     $response->assertStatus(200)
         ->assertHeader('Content-Type', 'application/xml; charset=UTF-8')
-        ->assertSee('/sites/sitemap-agency/home', false)
+        ->assertSee('/sites/sitemap-agency</loc>', false)
+        ->assertDontSee('/sites/sitemap-agency/home', false)
         ->assertSee('<priority>1.0</priority>', false);
 
     expect($response->headers->get('Cache-Control'))->toContain('public')

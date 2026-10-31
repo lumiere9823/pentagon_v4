@@ -54,6 +54,23 @@ test('it computes fallback cascade correctly when custom SEO fields are empty', 
         ->and($metaString)->toContain('<script type="application/ld+json">');
 });
 
+test('it computes canonical URL as website root for homepage', function () {
+    $manager = new PageSeoManager;
+
+    $website = Website::factory()->create(['slug' => 'acme-corp']);
+    $page = Page::factory()->homepage()->create([
+        'website_id' => $website->id,
+        'title' => 'Home',
+        'slug' => 'home',
+        'seo_metadata' => [],
+    ]);
+
+    $payload = $manager->buildSeoPayload($page, $website);
+
+    expect($payload['canonical_url'])->toBe(url('/sites/acme-corp'))
+        ->and($payload['canonical_url'])->not->toContain('/home');
+});
+
 test('it applies custom SEO overrides and noindex directives', function () {
     $manager = new PageSeoManager;
 

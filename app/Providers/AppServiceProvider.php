@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Domains\Pages\Contracts\PublicPageLocatorInterface;
+use App\Domains\Pages\Services\PublicPageLocator;
 use App\Domains\Websites\Contracts\HomepageManagerInterface;
 use App\Domains\Websites\Contracts\WebsiteProvisionerInterface;
 use App\Domains\Websites\Services\HomepageManager;
@@ -21,6 +23,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->bind(WebsiteProvisionerInterface::class, WebsiteProvisioner::class);
         $this->app->bind(HomepageManagerInterface::class, HomepageManager::class);
+        $this->app->bind(PublicPageLocatorInterface::class, PublicPageLocator::class);
     }
 
     /**

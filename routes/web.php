@@ -91,6 +91,9 @@ Route::get('sites/{website:slug}/robots.txt', [RobotsController::class, 'show'])
 // Expiring cryptographically signed preview (M17)
 Route::get('preview/pages/{page}', [PagePreviewController::class, 'showSigned'])->name('preview.signed');
 
+// Public Static Website Root (Homepage) Delivery
+Route::get('sites/{website:slug}', [PublicPageController::class, 'showRoot'])->name('public.sites.root');
+
 // Public Static Page Delivery with ETag Caching (M17)
 Route::get('sites/{website:slug}/{page:slug}', [PublicPageController::class, 'show'])->name('public.sites.pages.show');
 

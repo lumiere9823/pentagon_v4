@@ -16,8 +16,8 @@ test('it generates valid W3C XML sitemap only for published active pages without
 
     $website = Website::factory()->create(['slug' => 'sitemap-test']);
 
-    // Page 1: Published, Active Release -> Should be included
-    $page1 = Page::factory()->create([
+    // Page 1: Published, Active Release, Homepage -> Should be included as root
+    $page1 = Page::factory()->homepage()->create([
         'website_id' => $website->id,
         'title' => 'Home Page',
         'slug' => 'home',
@@ -28,6 +28,22 @@ test('it generates valid W3C XML sitemap only for published active pages without
     PageRelease::factory()->create([
         'page_id' => $page1->id,
         'page_revision_id' => $rev1->id,
+        'status' => PageReleaseStatus::ACTIVE,
+    ]);
+
+    // Page 1b: Published, Active Release, Ordinary Page -> Should be included with slug
+    $pageAbout = Page::factory()->create([
+        'website_id' => $website->id,
+        'title' => 'About Us',
+        'slug' => 'about',
+        'is_homepage' => false,
+        'status' => PageStatus::PUBLISHED,
+        'seo_metadata' => ['noindex' => false],
+    ]);
+    $revAbout = PageRevision::factory()->create(['page_id' => $pageAbout->id]);
+    PageRelease::factory()->create([
+        'page_id' => $pageAbout->id,
+        'page_revision_id' => $revAbout->id,
         'status' => PageReleaseStatus::ACTIVE,
     ]);
 
@@ -66,8 +82,11 @@ test('it generates valid W3C XML sitemap only for published active pages without
 
     expect($xml)->toContain('<urlset')
         ->and($xml)->toContain('http://www.sitemaps.org/schemas/sitemap/0.9')
-        ->and($xml)->toContain('/sites/sitemap-test/home')
+        ->and($xml)->toContain('/sites/sitemap-test</loc>')
+        ->and($xml)->toContain('/sites/sitemap-test/about</loc>')
+        ->and($xml)->not->toContain('/sites/sitemap-test/home')
         ->and($xml)->toContain('<priority>1.0</priority>')
+        ->and($xml)->toContain('<priority>0.8</priority>')
         ->and($xml)->not->toContain('/sites/sitemap-test/hidden')
         ->and($xml)->not->toContain('/sites/sitemap-test/draft')
         ->and($xml)->not->toContain('/sites/sitemap-test/unreleased');

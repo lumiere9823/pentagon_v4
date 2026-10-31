@@ -2,6 +2,7 @@
 
 namespace App\Domains\SEO\Services;
 
+use App\Domains\Pages\Contracts\PublicPageLocatorInterface;
 use App\Enums\PageStatus;
 use App\Models\Page;
 use App\Models\Website;
@@ -9,6 +10,12 @@ use DOMDocument;
 
 class SitemapGenerator
 {
+    public function __construct(
+        protected ?PublicPageLocatorInterface $pageLocator = null
+    ) {
+        $this->pageLocator = $pageLocator ?? app(PublicPageLocatorInterface::class);
+    }
+
     /**
      * Generate W3C compliant XML sitemap for a website.
      * Only includes published pages with an active release and without `noindex`.
@@ -43,7 +50,7 @@ class SitemapGenerator
             $canonicalOverride = $page->seo_metadata['canonical_url'] ?? null;
             $loc = ! empty($canonicalOverride)
                 ? $canonicalOverride
-                : url("/sites/{$website->slug}/{$page->slug}");
+                : $this->pageLocator->getCanonicalUrl($page, $website);
 
             $locElement = $dom->createElement('loc', htmlspecialchars($loc, ENT_QUOTES, 'UTF-8'));
             $urlElement->appendChild($locElement);
@@ -60,7 +67,7 @@ class SitemapGenerator
             $urlElement->appendChild($changefreqElement);
 
             // Priority
-            $priority = ($page->slug === 'home' || $page->slug === 'index') ? '1.0' : '0.8';
+            $priority = $this->pageLocator->isHomepage($page) ? '1.0' : '0.8';
             $priorityElement = $dom->createElement('priority', $priority);
             $urlElement->appendChild($priorityElement);
 
