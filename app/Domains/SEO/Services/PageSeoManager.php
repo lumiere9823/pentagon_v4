@@ -9,10 +9,8 @@ use App\Models\Website;
 class PageSeoManager
 {
     public function __construct(
-        protected ?PublicPageLocatorInterface $pageLocator = null
-    ) {
-        $this->pageLocator = $pageLocator ?? app(PublicPageLocatorInterface::class);
-    }
+        protected PublicPageLocatorInterface $pageLocator
+    ) {}
 
     /**
      * Clean and normalize SEO metadata structure.

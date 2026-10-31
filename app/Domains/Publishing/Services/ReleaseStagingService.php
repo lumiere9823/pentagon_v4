@@ -20,16 +20,12 @@ class ReleaseStagingService
 {
     public const RENDERER_VERSION = 2;
 
-    protected PageSeoManager $seoManager;
-
     public function __construct(
         protected DocumentHtmlRenderer $htmlRenderer,
         protected ReleaseManifestVerifier $manifestVerifier,
         protected MediaUsageScanner $mediaUsageScanner,
-        ?PageSeoManager $seoManager = null
-    ) {
-        $this->seoManager = $seoManager ?? new PageSeoManager;
-    }
+        protected PageSeoManager $seoManager,
+    ) {}
 
     /**
      * Create an unsealed candidate release attached to an immutable PageRevision.

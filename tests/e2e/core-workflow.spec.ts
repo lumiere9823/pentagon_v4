@@ -9,6 +9,7 @@ const viewports = [
 
 test('owner can create website with starter set, publish homepage, redirect technical slug, and reassign homepage', async ({
     page,
+    request,
 }, testInfo) => {
     // 1. Authenticate as owner
     await page.goto('/login');
@@ -93,12 +94,12 @@ test('owner can create website with starter set, publish homepage, redirect tech
     expect(publicUrl).toMatch(/\/sites\/e2e-website$/);
 
     // Canonical root returns 200
-    const publishedResponse = await page.request.get(publicUrl!);
+    const publishedResponse = await request.get(publicUrl!);
     expect(publishedResponse.status()).toBe(200);
     expect(await publishedResponse.text()).toContain('Welcome to your new website');
 
     // Technical slug /home permanently redirects (301) to canonical root
-    const technicalSlugResponse = await page.request.get(`${publicUrl}/home`, {
+    const technicalSlugResponse = await request.get(`${publicUrl}/home`, {
         maxRedirects: 0,
     });
     expect(technicalSlugResponse.status()).toBe(301);

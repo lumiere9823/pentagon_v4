@@ -5,7 +5,7 @@ use App\Models\Page;
 use App\Models\Website;
 
 test('it normalizes SEO metadata with bounded lengths and defaults', function () {
-    $manager = new PageSeoManager;
+    $manager = app(PageSeoManager::class);
 
     $normalized = $manager->normalizeSeoMetadata([
         'meta_title' => '<b>Title</b>'.str_repeat('a', 200),
@@ -31,7 +31,7 @@ test('it normalizes SEO metadata with bounded lengths and defaults', function ()
 });
 
 test('it computes fallback cascade correctly when custom SEO fields are empty', function () {
-    $manager = new PageSeoManager;
+    $manager = app(PageSeoManager::class);
 
     $website = Website::factory()->create(['slug' => 'acme-corp']);
     $page = Page::factory()->create([
@@ -55,7 +55,7 @@ test('it computes fallback cascade correctly when custom SEO fields are empty', 
 });
 
 test('it computes canonical URL as website root for homepage', function () {
-    $manager = new PageSeoManager;
+    $manager = app(PageSeoManager::class);
 
     $website = Website::factory()->create(['slug' => 'acme-corp']);
     $page = Page::factory()->homepage()->create([
@@ -72,7 +72,7 @@ test('it computes canonical URL as website root for homepage', function () {
 });
 
 test('it applies custom SEO overrides and noindex directives', function () {
-    $manager = new PageSeoManager;
+    $manager = app(PageSeoManager::class);
 
     $website = Website::factory()->create(['slug' => 'acme-corp']);
     $page = Page::factory()->create([
@@ -102,7 +102,7 @@ test('it applies custom SEO overrides and noindex directives', function () {
 });
 
 test('it formats custom structured data JSON-LD and securely escapes closing script tags (MQA-04)', function () {
-    $manager = new PageSeoManager;
+    $manager = app(PageSeoManager::class);
 
     $website = Website::factory()->create(['slug' => 'acme-corp']);
     $page = Page::factory()->create([
@@ -129,7 +129,7 @@ test('it formats custom structured data JSON-LD and securely escapes closing scr
 });
 
 test('it handles standalone nofollow directive and summary twitter card', function () {
-    $manager = new PageSeoManager;
+    $manager = app(PageSeoManager::class);
 
     $website = Website::factory()->create(['slug' => 'acme-corp']);
     $page = Page::factory()->create([

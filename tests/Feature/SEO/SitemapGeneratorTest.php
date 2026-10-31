@@ -12,7 +12,7 @@ use App\Models\Website;
 use App\Models\WebsiteMembership;
 
 test('it generates valid W3C XML sitemap only for published active pages without noindex', function () {
-    $generator = new SitemapGenerator;
+    $generator = app(SitemapGenerator::class);
 
     $website = Website::factory()->create(['slug' => 'sitemap-test']);
 

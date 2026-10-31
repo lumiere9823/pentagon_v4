@@ -1151,7 +1151,7 @@ Tạo page DRAFT, lock_version=1
 
 `StarterTemplateSeeder` tạo 5 template global: `blank` (Blank Canvas), `business-landing`, `portfolio-agency`, `product-waitlist`, `lead-generation`. Mỗi fixture được validate theo schema v1. Seeder **không phá huỷ**: slug đã có thì giữ nguyên, trừ khi chạy với `--force`. Lệnh: `php artisan templates:seed [--force]`.
 
-### 9.6 Khởi tạo Website và bộ Starter Pages (`WebsiteProvisioner`, `StarterSetCatalog`, `HomepageManager` - D-048)
+### 9.6 Khởi tạo Website và bộ Starter Pages (`WebsiteProvisioner`, `StarterSetCatalog`, `StarterPageCreator`, `HomepageManager` - D-048)
 
 Thư mục: `app/Domains/Websites`.
 
@@ -1161,7 +1161,9 @@ Mã nguồn định nghĩa sẵn 3 starter page độc lập không phụ thuộ
 - **About:** title "About", slug `about`, `is_homepage = false`, tài liệu Schema v1 (Heading + Paragraph giới thiệu).
 - **Contact:** title "Contact", slug `contact`, `is_homepage = false`, tài liệu Schema v1 (Heading + Paragraph liên hệ).
 
-Mọi starter page AST đều được kiểm tra hợp lệ bằng `DocumentValidator::validateDocument()` khi khởi tạo. Không bao giờ lưu slug `/` hoặc slug rỗng vào DB.
+Mọi starter page AST đều được kiểm tra hợp lệ bằng `DocumentValidator::validate()` khi khởi tạo. Không bao giờ lưu slug `/` hoặc slug rỗng vào DB.
+
+`StarterPageCreator` là implementation dùng chung để tạo một starter `Page` cùng revision số 1. `WebsiteProvisioner` và lệnh backfill đều gọi module này, nên quy tắc document, revision và audit fields không bị sao chép giữa hai luồng.
 
 #### 2. Khởi tạo Website nguyên tử (`WebsiteProvisionerInterface` / `WebsiteProvisioner`)
 Khi gọi `WebsiteController::store()`:
@@ -1169,15 +1171,14 @@ Khi gọi `WebsiteController::store()`:
 2. Thực thi `WebsiteProvisionerInterface::provision($user, $data)` gói trọn trong một database transaction duy nhất:
    - Tạo bản ghi `Website` (`owner_id = $user->id`, `status = active`).
    - Tạo `WebsiteMembership` (`user_id = $user->id`, `role = owner`).
-   - Duyệt catalog starter pages: tạo từng `Page` ở trạng thái `draft`, `lock_version = 1`.
-   - Tạo revision số 1 cho từng trang ("Initial starter page revision") với `document_hash` SHA-256.
+   - Duyệt catalog starter pages và gọi `StarterPageCreator`: tạo từng `Page` ở trạng thái `draft`, `lock_version = 1` cùng revision số 1 và canonical `document_hash`.
 3. Không tự động publish bất kỳ starter page nào. Trang chủ khởi tạo ở trạng thái draft cho đến khi người dùng publish.
 
 #### 3. Quản lý Homepage và Đổi trang chủ (`HomepageManagerInterface` / `HomepageManager`)
 Route: `PUT /websites/{website}/homepage` (`AssignHomepageRequest`):
 - Ủy quyền: policy `update` trên `Website`.
 - Validate: `page_id` phải thuộc về chính website (`Rule::exists('pages', 'id')->where('website_id', $website->id)`).
-- `HomepageManager::assignHomepage($website, $pageId)`:
+- `HomepageManager::assign($website, $page, $actor)`:
   1. Transaction + khoá row website: `Website::where('id', $website->id)->lockForUpdate()`.
   2. Tìm page chỉ định (thuộc website). Nếu đang là homepage (`is_homepage = true`) thì giữ nguyên (idempotent).
   3. Cập nhật `is_homepage = false` cho homepage hiện tại của website.
@@ -1844,7 +1845,7 @@ Toàn bộ quyết định đều ở trạng thái **Accepted và đã hiện t
 - Các phương án đã cân nhắc:
   - Phương án 1: Dùng slug đặc biệt rỗng hoặc `/` trong database cho trang chủ. (Bị bác bỏ: làm phá vỡ quy ước slug `alpha_dash`, gây lỗi routing và URL encoding).
   - Phương án 2: Cột `websites.homepage_page_id` khóa ngoại tới `pages.id`. (Bị bác bỏ: tạo circular dependency giữa `websites` và `pages`, phức tạp hóa việc tạo website và xóa trang).
-  - Phương án 3 (Được chọn): Cột `pages.is_homepage` boolean có partial unique index `pages_one_homepage_per_website` trên `(website_id) WHERE is_homepage = true`. Bổ sung service `WebsiteProvisioner`, `StarterSetCatalog`, `HomepageManager` và `PublicPageLocator`.
+  - Phương án 3 (Được chọn): Cột `pages.is_homepage` boolean có partial unique index `pages_one_homepage_per_website` trên `(website_id) WHERE is_homepage = true`. Bổ sung service `WebsiteProvisioner`, `StarterSetCatalog`, `StarterPageCreator`, `HomepageManager` và `PublicPageLocator`.
 - Quyết định:
   1. Mỗi website đã commit có đúng một homepage.
   2. Tạo website nguyên tử sinh ra 3 trang starter ở trạng thái draft (Home, About, Contact) kèm revision 1. Home là homepage ban đầu.
@@ -1858,7 +1859,7 @@ Toàn bộ quyết định đều ở trạng thái **Accepted và đã hiện t
   - Không phá vỡ dữ liệu cũ; lệnh backfill chạy tự động sau migration trên môi trường deploy.
 - Bằng chứng (file, test):
   - Migration: `database/migrations/2026_10_31_140000_add_is_homepage_to_pages_table.php`
-  - Domain & Services: `app/Domains/Websites/Services/WebsiteProvisioner.php`, `StarterSetCatalog.php`, `HomepageManager.php`, `app/Domains/Pages/Services/PublicPageLocator.php`
+  - Domain & Services: `app/Domains/Websites/Services/WebsiteProvisioner.php`, `StarterSetCatalog.php`, `StarterPageCreator.php`, `HomepageManager.php`, `app/Domains/Pages/Services/PublicPageLocator.php`
   - Tests: `tests/Feature/Pages/HomepageDataModelTest.php`, `tests/Feature/Websites/WebsiteProvisionerTest.php`, `tests/Feature/Websites/HomepageAssignmentTest.php`, `tests/Feature/Pages/HomepageConcurrencyTest.php`, `tests/Feature/Pages/PublicPageLocatorTest.php`, `tests/Feature/Websites/BackfillWebsitesHomepagesCommandTest.php`, `tests/frontend/homepage-starter-set-ui.test.ts`, `tests/e2e/core-workflow.spec.ts`
 
 **Mẫu ghi quyết định mới:**

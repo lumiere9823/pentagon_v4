@@ -3,9 +3,7 @@
 namespace App\Domains\Websites\Services;
 
 use App\Domains\Websites\Contracts\WebsiteProvisionerInterface;
-use App\Enums\PageStatus;
 use App\Enums\WebsiteRole;
-use App\Models\PageRevision;
 use App\Models\User;
 use App\Models\Website;
 use Illuminate\Support\Facades\DB;
@@ -13,7 +11,8 @@ use Illuminate\Support\Facades\DB;
 class WebsiteProvisioner implements WebsiteProvisionerInterface
 {
     public function __construct(
-        protected StarterSetCatalog $starterCatalog
+        protected StarterSetCatalog $starterCatalog,
+        protected StarterPageCreator $starterPageCreator,
     ) {}
 
     /**
@@ -47,28 +46,7 @@ class WebsiteProvisioner implements WebsiteProvisionerInterface
             $starterPages = $this->starterCatalog->get($starterSet);
 
             foreach ($starterPages as $pageDef) {
-                $page = $website->pages()->create([
-                    'title' => $pageDef['title'],
-                    'slug' => $pageDef['slug'],
-                    'is_homepage' => $pageDef['is_homepage'],
-                    'status' => PageStatus::DRAFT,
-                    'lock_version' => 1,
-                    'document_json' => $pageDef['document'],
-                    'created_by' => $owner->id,
-                    'updated_by' => $owner->id,
-                ]);
-
-                PageRevision::create([
-                    'page_id' => $page->id,
-                    'revision_number' => 1,
-                    'schema_version' => 1,
-                    'document_json' => $pageDef['document'],
-                    'document_hash' => PageRevision::canonicalizeDocument($pageDef['document']),
-                    'change_summary' => $pageDef['summary'],
-                    'is_autosave' => false,
-                    'created_by' => $owner->id,
-                    'created_at' => now(),
-                ]);
+                $this->starterPageCreator->create($website, $pageDef, $owner);
             }
 
             return $website;

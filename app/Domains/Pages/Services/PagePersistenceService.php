@@ -25,6 +25,7 @@ class PagePersistenceService
         protected DocumentValidator $validator,
         protected MediaUsageScanner $scanner,
         protected MediaConcurrencyLock $lockService,
+        protected PageSeoManager $seoManager,
     ) {}
 
     /**
@@ -183,7 +184,7 @@ class PagePersistenceService
             // 9. Update page document and increment lock_version
             $lockedPage->document_json = $canonicalDocument;
             if ($seoMetadata !== null) {
-                $lockedPage->seo_metadata = (new PageSeoManager)->normalizeSeoMetadata($seoMetadata);
+                $lockedPage->seo_metadata = $this->seoManager->normalizeSeoMetadata($seoMetadata);
             }
             $lockedPage->lock_version = $lockedPage->lock_version + 1;
             $lockedPage->updated_by = $user->id;

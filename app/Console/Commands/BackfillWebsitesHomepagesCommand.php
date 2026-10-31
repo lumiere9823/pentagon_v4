@@ -2,10 +2,9 @@
 
 namespace App\Console\Commands;
 
+use App\Domains\Websites\Services\StarterPageCreator;
 use App\Domains\Websites\Services\StarterSetCatalog;
-use App\Enums\PageStatus;
 use App\Models\Page;
-use App\Models\PageRevision;
 use App\Models\Website;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -26,8 +25,10 @@ class BackfillWebsitesHomepagesCommand extends Command
      */
     protected $description = 'Idempotently backfill missing homepages for existing websites.';
 
-    public function handle(StarterSetCatalog $starterCatalog): int
-    {
+    public function handle(
+        StarterSetCatalog $starterCatalog,
+        StarterPageCreator $starterPageCreator,
+    ): int {
         $isCommit = (bool) $this->option('commit');
 
         $websites = Website::whereDoesntHave('pages', function ($q) {
@@ -89,32 +90,9 @@ class BackfillWebsitesHomepagesCommand extends Command
             // 3. Otherwise create canonical Home page + revision 1
             $this->line("Website {$website->id} ('{$website->slug}'): Created canonical Home page and revision 1");
             if ($isCommit) {
-                DB::transaction(function () use ($website, $starterCatalog) {
+                DB::transaction(function () use ($website, $starterCatalog, $starterPageCreator) {
                     $homeDef = $starterCatalog->getCanonicalHomeDefinition();
-                    $ownerId = $website->owner_id;
-
-                    $page = $website->pages()->create([
-                        'title' => $homeDef['title'],
-                        'slug' => $homeDef['slug'],
-                        'is_homepage' => true,
-                        'status' => PageStatus::DRAFT,
-                        'lock_version' => 1,
-                        'document_json' => $homeDef['document'],
-                        'created_by' => $ownerId,
-                        'updated_by' => $ownerId,
-                    ]);
-
-                    PageRevision::create([
-                        'page_id' => $page->id,
-                        'revision_number' => 1,
-                        'schema_version' => 1,
-                        'document_json' => $homeDef['document'],
-                        'document_hash' => PageRevision::canonicalizeDocument($homeDef['document']),
-                        'change_summary' => $homeDef['summary'],
-                        'is_autosave' => false,
-                        'created_by' => $ownerId,
-                        'created_at' => now(),
-                    ]);
+                    $starterPageCreator->create($website, $homeDef, $website->owner);
                 });
             }
             $homeCreated++;

@@ -11,10 +11,8 @@ use DOMDocument;
 class SitemapGenerator
 {
     public function __construct(
-        protected ?PublicPageLocatorInterface $pageLocator = null
-    ) {
-        $this->pageLocator = $pageLocator ?? app(PublicPageLocatorInterface::class);
-    }
+        protected PublicPageLocatorInterface $pageLocator
+    ) {}
 
     /**
      * Generate W3C compliant XML sitemap for a website.
