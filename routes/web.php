@@ -14,6 +14,7 @@ use App\Http\Controllers\PublicPageController;
 use App\Http\Controllers\RobotsController;
 use App\Http\Controllers\SitemapController;
 use App\Http\Controllers\WebsiteController;
+use App\Http\Controllers\WebsiteHomepageController;
 use App\Http\Controllers\WebsiteMembershipController;
 use Illuminate\Support\Facades\Route;
 
@@ -23,6 +24,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::inertia('dashboard', 'Dashboard')->name('dashboard');
 
     // Websites management
+    Route::put('websites/{website}/homepage', [WebsiteHomepageController::class, 'update'])->name('websites.homepage.update');
     Route::resource('websites', WebsiteController::class)->except(['edit']);
 
     // Website Memberships

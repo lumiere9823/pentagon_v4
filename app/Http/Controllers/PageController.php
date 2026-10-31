@@ -14,6 +14,7 @@ use App\Models\PageTemplate;
 use App\Models\Website;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -218,6 +219,12 @@ class PageController extends Controller
         }
 
         $this->authorize('delete', $page);
+
+        if ($page->is_homepage) {
+            throw ValidationException::withMessages([
+                'page' => 'Set another page as homepage before deleting this page.',
+            ]);
+        }
 
         $page->delete();
 

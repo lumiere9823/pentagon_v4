@@ -9,6 +9,7 @@
             <file>tests/Feature/Media/MediaConcurrencyTest.php</file>
             <file>tests/Feature/Pages/PageConcurrencyTest.php</file>
             <file>tests/Feature/Pages/HomepageDataModelTest.php</file>
+            <file>tests/Feature/Pages/HomepageConcurrencyTest.php</file>
             <file>tests/Feature/Publishing/PageReleaseModelTest.php</file>
             <file>tests/Feature/Publishing/PagePublishingConcurrencyTest.php</file>
         </testsuite>
