@@ -313,7 +313,7 @@ const handleItemClick = (type: CoreComponentType) => {
                         class="space-y-1.5"
                     >
                         <div
-                            class="text-[11px] font-semibold tracking-wider text-muted-foreground/80 uppercase"
+                            class="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase"
                         >
                             {{ categoryName }}
                         </div>

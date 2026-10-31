@@ -99,7 +99,8 @@ defineExpose({
 <template>
     <main
         ref="canvasContainerRef"
-        class="relative flex flex-1 flex-col overflow-auto bg-muted/40 p-4 sm:p-6"
+        tabindex="0"
+        class="relative flex flex-1 flex-col overflow-auto bg-muted/40 p-4 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden sm:p-6"
         aria-label="Editor Canvas Surface"
         @click="handleCanvasBackgroundClick"
     >
@@ -148,7 +149,7 @@ defineExpose({
                         {{ pageTitle }}
                     </div>
                     <div
-                        class="text-[10px] tracking-wider text-muted-foreground/60 uppercase"
+                        class="text-[10px] tracking-wider text-muted-foreground uppercase"
                     >
                         Live Preview
                     </div>
